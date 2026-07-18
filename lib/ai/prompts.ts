@@ -17,11 +17,31 @@ export function buildIndividualAnalysisPrompt(input: {
   typedResponses: TypedSubmission[];
   imageAliases: Array<{ responseId: string; studentAlias: string }>;
 }) {
+  const submissions = [
+    ...input.typedResponses.map((response) => ({ ...response, inputType: "typed" as const })),
+    ...input.imageAliases.map((response) => ({ ...response, inputType: "image" as const })),
+  ];
+  const requiredIds = submissions.map((response, index) => `${index + 1}. ${response.responseId}`).join("\n");
+  const responseBlocks = submissions.map((response, index) => {
+    const body = response.inputType === "typed"
+      ? `RESPONSE CONTENT:\n${response.responseText}`
+      : `IMAGE REFERENCE: The image attached for ${response.responseId}.`;
+    return [
+      `----- BEGIN STUDENT RESPONSE ${index + 1}/${submissions.length} -----`,
+      `RESPONSE ID: ${response.responseId}`,
+      `ALIAS: ${response.studentAlias}`,
+      `INPUT TYPE: ${response.inputType}`,
+      body,
+      `----- END STUDENT RESPONSE ${index + 1}/${submissions.length} -----`,
+    ].join("\n");
+  }).join("\n\n");
   const content = [
-    `Task: analyse every response once using only observable evidence. Return one analysis for every supplied response ID.`,
+    `Task: analyse every response once using only observable evidence.`,
+    `REQUIRED RESPONSE IDS — RETURN EACH EXACTLY ONCE:\n${requiredIds}`,
+    `Produce exactly one analysis for every listed ID. Never stop after the first response. Preserve each responseId exactly. If a response is unclear, return an insufficient_evidence analysis rather than omitting it. Do not combine multiple students into one analysis.`,
     `<assessment_context>\nQuestion: ${input.question}\nExpected reasoning or rubric: ${input.expectedReasoning}\n</assessment_context>`,
     `<${INPUT_BOUNDARY}>`,
-    JSON.stringify({ typedResponses: input.typedResponses, imageResponses: input.imageAliases }, null, 2),
+    responseBlocks,
     `</${INPUT_BOUNDARY}>`,
     `Image content attached after this text belongs to the corresponding image response alias. Transcribe only readable work.`,
   ].join("\n\n");

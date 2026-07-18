@@ -4,8 +4,10 @@ import { zodTextFormat } from "openai/helpers/zod";
 import { assessment, responses } from "@/lib/demo-data";
 import { createPreparedAnalysisRun } from "@/lib/ai/prepared";
 import { buildClusteringPrompt, buildIndividualAnalysisPrompt, containsExecutableInterventionContent } from "@/lib/ai/prompts";
-import { normalizeClassAnalysis, normalizeSubmissionAnalyses, membershipProblems } from "@/lib/ai/normalize";
-import { AnalysisRequestSchema, ClassAnalysisSchema, SubmissionAnalysesSchema } from "@/lib/ai/schemas";
+import { normalizeClassAnalysis, membershipProblems } from "@/lib/ai/normalize";
+import { AnalysisRequestSchema, buildSubmissionAnalysisBatchSchema, ClassAnalysisSchema } from "@/lib/ai/schemas";
+import { getResponseRefusal } from "@/lib/ai/response";
+import { buildAndValidateAnalysisInputManifest, runSubmissionAnalysisWithRecovery, type SubmissionBatchExecutor } from "@/lib/ai/submission-batch";
 
 describe("ClassTrace synthetic evaluation", () => {
   it("passes the offline structural and evidence baseline", () => {
@@ -19,9 +21,32 @@ describe("ClassTrace synthetic evaluation", () => {
   it.runIf(Boolean(process.env.OPENAI_API_KEY))("evaluates the sample class live with GPT-5.6", async () => {
     const request = AnalysisRequestSchema.parse({ mode: "live", question: assessment.question, expectedReasoning: assessment.expectedReasoning.join("\n"), typedResponses: responses.map((response, index) => ({ responseId: response.id, studentAlias: `Learner ${String(index + 1).padStart(2, "0")}`, responseText: response.answer })), imageResponses: [] });
     const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 90_000, maxRetries: 2 });
-    const individualPrompt = buildIndividualAnalysisPrompt({ ...request, imageAliases: [] });
-    const stageOne = await client.responses.parse({ model: "gpt-5.6", instructions: individualPrompt.instructions, input: individualPrompt.content, reasoning: { effort: "high" }, text: { format: zodTextFormat(SubmissionAnalysesSchema, "classtrace_eval_submissions") }, store: false });
-    const individuals = normalizeSubmissionAnalyses(stageOne.output_parsed, request);
+    const execute: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt) => {
+      const individualPrompt = buildIndividualAnalysisPrompt({ ...batchRequest, imageAliases: [] });
+      const manifest = buildAndValidateAnalysisInputManifest(batchRequest, individualPrompt.content);
+      expect(manifest.expectedCount).toBe(responseIds.length);
+      if (attempt === "primary") expect(manifest.expectedCount).toBe(12);
+      const startedAt = performance.now();
+      const stageOne = await client.responses.parse({
+        model: "gpt-5.6",
+        instructions: individualPrompt.instructions,
+        input: individualPrompt.content,
+        reasoning: { effort: "high" },
+        max_output_tokens: 40_000,
+        text: { format: zodTextFormat(buildSubmissionAnalysisBatchSchema(responseIds), `classtrace_eval_submissions_${attempt}`) },
+        store: false,
+      });
+      return {
+        status: stageOne.status ?? "unknown",
+        incompleteDetails: stageOne.incomplete_details,
+        usage: stageOne.usage ? { inputTokens: stageOne.usage.input_tokens, outputTokens: stageOne.usage.output_tokens, totalTokens: stageOne.usage.total_tokens } : null,
+        outputParsed: stageOne.output_parsed,
+        refusal: getResponseRefusal(stageOne),
+        latencyMs: Math.round(performance.now() - startedAt),
+      };
+    };
+    const { analyses: individuals, telemetry } = await runSubmissionAnalysisWithRecovery(request, execute);
+    console.info("ClassTrace live individual-analysis telemetry", telemetry);
     const clusterPrompt = buildClusteringPrompt({ question: request.question, analyses: individuals });
     const stageTwo = await client.responses.parse({ model: "gpt-5.6", instructions: clusterPrompt.instructions, input: clusterPrompt.content, reasoning: { effort: "high" }, text: { format: zodTextFormat(ClassAnalysisSchema, "classtrace_eval_class") }, store: false });
     const classAnalysis = normalizeClassAnalysis(stageTwo.output_parsed, individuals);

@@ -67,6 +67,17 @@ export const SubmissionAnalysesSchema = z.object({
   analyses: z.array(SubmissionAnalysisSchema).min(1).max(MAX_RESPONSES),
 }).strict();
 
+export function buildSubmissionAnalysisBatchSchema(responseIds: string[]) {
+  if (responseIds.length === 0) throw new Error("At least one response ID is required to build an analysis schema.");
+  if (new Set(responseIds).size !== responseIds.length) throw new Error("Response IDs must be unique to build an analysis schema.");
+  const [firstResponseId, ...remainingResponseIds] = responseIds;
+  const responseIdSchema = z.enum([firstResponseId!, ...remainingResponseIds]);
+  const requestSpecificAnalysisSchema = SubmissionAnalysisSchema.extend({ responseId: responseIdSchema });
+  return z.object({
+    analyses: z.array(requestSpecificAnalysisSchema).length(responseIds.length),
+  }).strict();
+}
+
 export const RecommendedInterventionTypeSchema = z.enum([
   "circle_area_explorer",
   "comparison_activity",

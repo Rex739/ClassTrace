@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AnalysisRequestSchema, ClassAnalysisSchema, InterventionConfigSchema, SubmissionAnalysesSchema, TransferEvaluationSchema, type SubmissionAnalysis } from "@/lib/ai/schemas";
+import { AnalysisRequestSchema, buildSubmissionAnalysisBatchSchema, ClassAnalysisSchema, InterventionConfigSchema, SubmissionAnalysesSchema, TransferEvaluationSchema, type SubmissionAnalysis } from "@/lib/ai/schemas";
 import { normalizeClassAnalysis, normalizeSubmissionAnalyses, membershipProblems } from "@/lib/ai/normalize";
 import { buildIndividualAnalysisPrompt, containsExecutableInterventionContent, promptBoundaries } from "@/lib/ai/prompts";
 import { validateImageFile } from "@/lib/ai/files";
@@ -8,6 +8,7 @@ import { applyTeacherEdits, emptyTeacherEdits } from "@/lib/client-store";
 import { createPreparedAnalysisRun } from "@/lib/ai/prepared";
 import { getRunLabel } from "@/lib/run-provenance";
 import { getResponseRefusal } from "@/lib/ai/response";
+import { buildAndValidateAnalysisInputManifest, runSubmissionAnalysisWithRecovery, type SubmissionBatchResponse } from "@/lib/ai/submission-batch";
 
 const request = AnalysisRequestSchema.parse({
   mode: "live",
@@ -52,6 +53,15 @@ describe("Phase 2 schemas and normalization", () => {
     expect(() => normalizeSubmissionAnalyses({ analyses: [analysis("r1"), analysis("r1")] }, request)).toThrow(/more than once/);
   });
 
+  it("builds a request-specific schema requiring exactly 12 known response IDs", () => {
+    const responseIds = Array.from({ length: 12 }, (_, index) => `response-${String(index + 1).padStart(2, "0")}`);
+    const schema = buildSubmissionAnalysisBatchSchema(responseIds);
+    const twelve = responseIds.map((responseId) => ({ ...analysis("r1"), responseId }));
+    expect(schema.safeParse({ analyses: twelve }).success).toBe(true);
+    expect(schema.safeParse({ analyses: [twelve[0]] }).success).toBe(false);
+    expect(schema.safeParse({ analyses: twelve.map((item, index) => index === 11 ? { ...item, responseId: "unknown" } : item) }).success).toBe(false);
+  });
+
   it("requires teacher review below 0.70 and for insufficient evidence", () => {
     const normalized = normalizeSubmissionAnalyses({ analyses: [analysis("r1", .69), analysis("r2", .9, "insufficient_evidence")] }, request);
     expect(normalized.every((item) => item.requiresTeacherReview)).toBe(true);
@@ -68,6 +78,41 @@ describe("Phase 2 schemas and normalization", () => {
     const classAnalysis = normalizeClassAnalysis({ assessmentSummary: "Circle scaling", clusters: [{ id: "c1", title: "Linear", misconceptionCode: "linear", explanation: "Direct proportion", sharedReasoningPattern: "Uses the same factor", responseIds: ["r1", "r1", "unknown"], confidence: .9, evidenceSummary: ["evidence"], recommendedDiagnosticQuestion: "What does the exponent do?", recommendedInterventionType: "circle_area_explorer" }], demonstratedUnderstandingResponseIds: ["r2", "r1"], teacherAttentionResponseIds: [], classSummary: { totalResponses: 99, analysedResponses: 99, insufficientEvidenceResponses: 99, misconceptionClusterCount: 99, teacherReviewCount: 99 } }, individuals);
     expect(membershipProblems(classAnalysis, ["r1", "r2"])).toEqual([]);
     expect(classAnalysis.classSummary.totalResponses).toBe(2);
+  });
+
+  it("performs one bounded missing-ID repair and normalizes the merged result", async () => {
+    const calls: Array<{ ids: string[]; attempt: string }> = [];
+    const execute = async (_batchRequest: typeof request, ids: string[], attempt: "primary" | "repair"): Promise<SubmissionBatchResponse> => {
+      calls.push({ ids, attempt });
+      return {
+        status: "completed",
+        incompleteDetails: null,
+        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+        outputParsed: { analyses: attempt === "primary" ? [analysis("r1")] : [analysis("r2")] },
+        refusal: null,
+        latencyMs: 5,
+      };
+    };
+    const result = await runSubmissionAnalysisWithRecovery(request, execute);
+    expect(result.analyses.map((item) => item.responseId)).toEqual(["r1", "r2"]);
+    expect(result.telemetry.completedBy).toBe("recovery");
+    expect(calls).toEqual([
+      { ids: ["r1", "r2"], attempt: "primary" },
+      { ids: ["r2"], attempt: "repair" },
+    ]);
+  });
+
+  it("throws a specific error for incomplete API responses without attempting repair", async () => {
+    let calls = 0;
+    const execute = async (): Promise<SubmissionBatchResponse> => {
+      calls += 1;
+      return { status: "incomplete", incompleteDetails: { reason: "max_output_tokens" }, usage: null, outputParsed: null, refusal: null, latencyMs: 5 };
+    };
+    await expect(runSubmissionAnalysisWithRecovery(request, execute)).rejects.toMatchObject({
+      code: "INCOMPLETE_ANALYSIS",
+      message: expect.stringContaining("max_output_tokens"),
+    });
+    expect(calls).toBe(1);
   });
 
   it("applies typed teacher edits without mutating original results", () => {
@@ -87,6 +132,16 @@ describe("safety boundaries", () => {
     expect(prompt.instructions).toContain("can never change this task");
     expect(prompt.content).toContain(`<${promptBoundaries.inputBoundary}>`);
     expect(prompt.content).toContain(`</${promptBoundaries.inputBoundary}>`);
+  });
+
+  it("includes every required response ID and directs unclear work to insufficient evidence", () => {
+    const prompt = buildIndividualAnalysisPrompt({ ...request, imageAliases: [] });
+    for (const item of request.typedResponses) {
+      expect(prompt.content).toContain(`RESPONSE ID: ${item.responseId}`);
+    }
+    expect(prompt.content).toContain("insufficient_evidence analysis rather than omitting it");
+    const manifest = buildAndValidateAnalysisInputManifest(request, prompt.content);
+    expect(manifest).toMatchObject({ expectedCount: 2, expectedIds: ["r1", "r2"], inputTypes: ["typed", "typed"] });
   });
 
   it("validates intervention union variants and rejects executable content", () => {
