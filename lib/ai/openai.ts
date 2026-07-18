@@ -10,7 +10,7 @@ let client: OpenAI | null = null;
 export function getOpenAIClient(): OpenAI {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) throw new ClassTraceError("MISSING_API_KEY", "Live GPT-5.6 analysis is not configured. Add OPENAI_API_KEY or open the prepared demonstration.", false, 503);
-  client ??= new OpenAI({ apiKey, timeout: 90_000, maxRetries: 2 });
+  client ??= new OpenAI({ apiKey, timeout: 150_000, maxRetries: 0 });
   return client;
 }
 

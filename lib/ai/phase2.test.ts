@@ -91,6 +91,9 @@ describe("Phase 2 schemas and normalization", () => {
         outputParsed: { analyses: attempt === "primary" ? [analysis("r1")] : [analysis("r2")] },
         refusal: null,
         latencyMs: 5,
+        requestId: "req_test",
+        sdkRetryUsed: false,
+        applicationRepairUsed: attempt === "repair",
       };
     };
     const result = await runSubmissionAnalysisWithRecovery(request, execute);
@@ -106,7 +109,7 @@ describe("Phase 2 schemas and normalization", () => {
     let calls = 0;
     const execute = async (): Promise<SubmissionBatchResponse> => {
       calls += 1;
-      return { status: "incomplete", incompleteDetails: { reason: "max_output_tokens" }, usage: null, outputParsed: null, refusal: null, latencyMs: 5 };
+      return { status: "incomplete", incompleteDetails: { reason: "max_output_tokens" }, usage: null, outputParsed: null, refusal: null, latencyMs: 5, requestId: "req_test", sdkRetryUsed: false, applicationRepairUsed: false };
     };
     await expect(runSubmissionAnalysisWithRecovery(request, execute)).rejects.toMatchObject({
       code: "INCOMPLETE_ANALYSIS",

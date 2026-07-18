@@ -11,5 +11,5 @@ if (!process.env.OPENAI_API_KEY && existsSync(localEnvPath)) {
 
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, ".") } },
-  test: { environment: "node", include: ["eval/**/*.eval.test.ts"], testTimeout: 240_000 },
+  test: { environment: "node", include: ["eval/**/*.eval.test.ts"], testTimeout: 360_000 },
 });

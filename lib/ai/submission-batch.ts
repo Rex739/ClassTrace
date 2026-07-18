@@ -25,6 +25,9 @@ export interface SubmissionBatchResponse {
   outputParsed: unknown;
   refusal: string | null;
   latencyMs: number;
+  requestId: string | null;
+  sdkRetryUsed: boolean;
+  applicationRepairUsed: boolean;
 }
 
 export interface SubmissionBatchTelemetry {
@@ -40,6 +43,9 @@ export interface SafeBatchInspection {
   parsedAnalysisCount: number;
   parsedResponseIds: string[];
   latencyMs: number;
+  requestId: string | null;
+  sdkRetryUsed: boolean;
+  applicationRepairUsed: boolean;
 }
 
 export type SubmissionBatchExecutor = (
@@ -47,6 +53,15 @@ export type SubmissionBatchExecutor = (
   responseIds: string[],
   attempt: "primary" | "repair",
 ) => Promise<SubmissionBatchResponse>;
+
+export type SubmissionBatchStage = "individual-normalization" | "missing-id-repair";
+export type SubmissionBatchStageObserver = (event: {
+  stage: SubmissionBatchStage;
+  phase: "start" | "end";
+  timestamp: string;
+  durationMs: number | null;
+  outcome: "running" | "completed" | "failed";
+}) => void;
 
 function submissions(request: AnalysisRequest) {
   return [
@@ -87,6 +102,9 @@ export function inspectSubmissionBatchResponse(response: SubmissionBatchResponse
     parsedAnalysisCount: parsed.success ? parsed.data.analyses.length : 0,
     parsedResponseIds: parsed.success ? parsed.data.analyses.map((analysis) => analysis.responseId) : [],
     latencyMs: response.latencyMs,
+    requestId: response.requestId,
+    sdkRetryUsed: response.sdkRetryUsed,
+    applicationRepairUsed: response.applicationRepairUsed,
   };
 }
 
@@ -125,35 +143,50 @@ function missingIds(raw: unknown, expectedIds: string[]): string[] {
 export async function runSubmissionAnalysisWithRecovery(
   request: AnalysisRequest,
   execute: SubmissionBatchExecutor,
+  observeStage?: SubmissionBatchStageObserver,
 ): Promise<{ analyses: SubmissionAnalysis[]; telemetry: SubmissionBatchTelemetry }> {
   const expectedIds = submissions(request).map((item) => item.responseId);
   const primary = await execute(request, expectedIds, "primary");
   assertCompleted(primary);
   const primaryInspection = inspectSubmissionBatchResponse(primary);
 
+  const normalizationStartedAt = Date.now();
+  observeStage?.({ stage: "individual-normalization", phase: "start", timestamp: new Date(normalizationStartedAt).toISOString(), durationMs: null, outcome: "running" });
   try {
+    const analyses = normalizeSubmissionAnalyses(primary.outputParsed, request);
+    observeStage?.({ stage: "individual-normalization", phase: "end", timestamp: new Date().toISOString(), durationMs: Date.now() - normalizationStartedAt, outcome: "completed" });
     return {
-      analyses: normalizeSubmissionAnalyses(primary.outputParsed, request),
+      analyses,
       telemetry: { primary: primaryInspection, recovery: null, completedBy: "primary" },
     };
   } catch (error) {
+    observeStage?.({ stage: "individual-normalization", phase: "end", timestamp: new Date().toISOString(), durationMs: Date.now() - normalizationStartedAt, outcome: "failed" });
     if (!(error instanceof ClassTraceError) || error.code !== "INCOMPLETE_ANALYSIS" || !error.message.includes("omitted")) throw error;
     const missing = missingIds(primary.outputParsed, expectedIds);
     if (missing.length === 0) throw error;
 
-    const repairRequest = requestForIds(request, missing);
-    const repair = await execute(repairRequest, missing, "repair");
-    assertCompleted(repair);
-    const repairParsed = SubmissionAnalysesSchema.parse(repair.outputParsed);
-    const initialParsed = SubmissionAnalysesSchema.parse(primary.outputParsed);
-    const merged = { analyses: [...initialParsed.analyses, ...repairParsed.analyses] };
-    return {
-      analyses: normalizeSubmissionAnalyses(merged, request),
-      telemetry: {
-        primary: primaryInspection,
-        recovery: inspectSubmissionBatchResponse(repair),
-        completedBy: "recovery",
-      },
-    };
+    const repairStartedAt = Date.now();
+    observeStage?.({ stage: "missing-id-repair", phase: "start", timestamp: new Date(repairStartedAt).toISOString(), durationMs: null, outcome: "running" });
+    try {
+      const repairRequest = requestForIds(request, missing);
+      const repair = await execute(repairRequest, missing, "repair");
+      assertCompleted(repair);
+      const repairParsed = SubmissionAnalysesSchema.parse(repair.outputParsed);
+      const initialParsed = SubmissionAnalysesSchema.parse(primary.outputParsed);
+      const merged = { analyses: [...initialParsed.analyses, ...repairParsed.analyses] };
+      const analyses = normalizeSubmissionAnalyses(merged, request);
+      observeStage?.({ stage: "missing-id-repair", phase: "end", timestamp: new Date().toISOString(), durationMs: Date.now() - repairStartedAt, outcome: "completed" });
+      return {
+        analyses,
+        telemetry: {
+          primary: primaryInspection,
+          recovery: inspectSubmissionBatchResponse(repair),
+          completedBy: "recovery",
+        },
+      };
+    } catch (repairError) {
+      observeStage?.({ stage: "missing-id-repair", phase: "end", timestamp: new Date().toISOString(), durationMs: Date.now() - repairStartedAt, outcome: "failed" });
+      throw repairError;
+    }
   }
 }

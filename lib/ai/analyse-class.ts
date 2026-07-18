@@ -53,15 +53,15 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
     });
     const schema = buildSubmissionAnalysisBatchSchema(responseIds);
     const startedAt = performance.now();
-    const individualResponse = await openai.responses.parse({
+    const { data: individualResponse, request_id: requestId } = await openai.responses.parse({
       model: CLASSTRACE_MODEL,
       instructions: individualPrompt.instructions,
       input: [{ role: "user", content: [{ type: "input_text", text: individualPrompt.content }, ...imageContent] }],
-      reasoning: { effort: "high" },
-      max_output_tokens: 40_000,
+      reasoning: { effort: "medium" },
+      max_output_tokens: 16_000,
       text: { format: zodTextFormat(schema, `classtrace_submission_analyses_${attempt}`) },
       store: false,
-    });
+    }).withResponse();
     const result = {
       status: individualResponse.status ?? "unknown",
       incompleteDetails: individualResponse.incomplete_details,
@@ -73,6 +73,9 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
       outputParsed: individualResponse.output_parsed,
       refusal: getResponseRefusal(individualResponse),
       latencyMs: Math.round(performance.now() - startedAt),
+      requestId,
+      sdkRetryUsed: false,
+      applicationRepairUsed: attempt === "repair",
     };
     if (process.env.NODE_ENV !== "production") {
       console.info(`ClassTrace individual-analysis ${attempt} response`, inspectSubmissionBatchResponse(result));
@@ -83,14 +86,36 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
 
   report("clustering", "Discovering shared reasoning patterns");
   const clusterPrompt = buildClusteringPrompt({ question: request.question, analyses: individualAnalyses });
-  const clusterResponse = await openai.responses.parse({
+  const clusterStartedAt = performance.now();
+  const { data: clusterResponse, request_id: clusterRequestId } = await openai.responses.parse({
     model: CLASSTRACE_MODEL,
     instructions: clusterPrompt.instructions,
     input: clusterPrompt.content,
-    reasoning: { effort: "high" },
+    reasoning: { effort: "medium" },
+    max_output_tokens: 16_000,
     text: { format: zodTextFormat(ClassAnalysisSchema, "classtrace_class_analysis") },
     store: false,
-  });
+  }).withResponse();
+  if (process.env.NODE_ENV !== "production") {
+    console.info("ClassTrace cohort-clustering response", {
+      stage: "cohort-clustering-request",
+      durationMs: Math.round(performance.now() - clusterStartedAt),
+      status: clusterResponse.status ?? "unknown",
+      incompleteReason: clusterResponse.incomplete_details?.reason ?? null,
+      requestId: clusterRequestId,
+      usage: clusterResponse.usage ? {
+        inputTokens: clusterResponse.usage.input_tokens,
+        outputTokens: clusterResponse.usage.output_tokens,
+        totalTokens: clusterResponse.usage.total_tokens,
+      } : null,
+      parsedItemCount: clusterResponse.output_parsed?.clusters.length ?? 0,
+      sdkRetryUsed: false,
+      applicationRepairUsed: false,
+    });
+  }
+  if (clusterResponse.status === "incomplete") {
+    throw new ClassTraceError("INCOMPLETE_ANALYSIS", `GPT-5.6 returned incomplete cohort clustering (${clusterResponse.incomplete_details?.reason ?? "unknown_reason"}).`, true, 502);
+  }
   const clusterRefusal = getResponseRefusal(clusterResponse);
   if (clusterRefusal) throw new ClassTraceError("MODEL_REFUSAL", "GPT-5.6 declined to cluster the class analysis.", false, 422);
   if (!clusterResponse.output_parsed) throw new ClassTraceError("MALFORMED_OUTPUT", "GPT-5.6 did not return a complete structured class analysis.", true, 502);
