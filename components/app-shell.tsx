@@ -23,7 +23,7 @@ export function AppShell({ children, active = "analysis" }: { children: ReactNod
         </details>
       </header>
       <main>{children}</main>
-      <footer className="app-footer"><Logo compact /><span>See how your class is thinking.</span><span>Phase 1 · deterministic demo</span></footer>
+      <footer className="app-footer"><Logo compact /><span>See how your class is thinking.</span><span>Teacher-reviewed reasoning intelligence</span></footer>
     </div>
   );
 }
