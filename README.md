@@ -1,64 +1,196 @@
 # ClassTrace
 
-**See how your class is thinking.**
+> **See how your class is thinking.**
 
-ClassTrace is misconception intelligence for teachers. It reconstructs observable reasoning across responses to one question, discovers shared possible misconceptions, supports teacher review, configures targeted interventions, and evaluates whether the reasoning transfers to a new problem.
+ClassTrace analyses student work, identifies evidence-grounded reasoning patterns, helps teachers approve targeted interventions, and verifies whether understanding transfers to a new problem.
 
-The main experience is a teacher-facing reasoning instrument—not a chatbot.
+[Live application](https://class-trace-one.vercel.app) · [GitHub repository](https://github.com/Rex739/ClassTrace) · **Demo video:** [ADD PUBLIC YOUTUBE URL] · **OpenAI Build Week / Devpost:** [ADD SUBMISSION URL]
+
+## The problem
+
+Teachers can often see which answers are incorrect, but not quickly determine why each learner arrived there. Similar final answers can come from different reasoning paths, while different answers can share the same underlying break. Treating every wrong answer alike can therefore lead to ineffective reteaching.
+
+## The solution
+
+ClassTrace accepts a question, a reasoning guide, and de-identified student responses. GPT-5.6 reconstructs observable reasoning, proposes possible misconception patterns, and groups responses by shared evidence rather than answer matching alone.
+
+Teachers can inspect exact excerpts, confidence, and alternative hypotheses before approving or adjusting any result. ClassTrace then configures a targeted intervention, renders it through trusted React components, and evaluates whether a learner can transfer the concept to a new problem—not merely repeat a correct final answer.
+
+ClassTrace does not diagnose intelligence, ability, or medical, psychological, behavioural, or neurodevelopmental conditions. It supports teacher judgement; it does not replace it.
+
+## Core product flow
+
+```text
+Assessment setup
+  → GPT-5.6 response analysis
+  → evidence-grounded Trace Map
+  → teacher review
+  → targeted intervention
+  → learner transfer check
+  → verified outcome
+```
+
+## Key features
+
+- Typed and image-based student work using de-identified learner labels.
+- Two concurrent, request-specific GPT-5.6 analysis batches for the 12-response sample.
+- Exact response-ID membership and verbatim evidence validation.
+- Reasoning-based cohort clustering and the signature Trace Map.
+- Confidence, insufficient-evidence handling, and alternative hypotheses.
+- Teacher controls to approve, rename, move, merge, review, and restore results.
+- Validated structured intervention configurations instead of model-generated code.
+- Trusted React activity rendering with teacher approval before learner access.
+- Prediction, exploration, explanation, and transfer stages.
+- GPT-5.6 transfer evaluation that considers conceptual reasoning, not only correctness.
+- Clear live-versus-prepared provenance and a safe JSON evidence export.
+- Versioned browser-local persistence and duplicate-analysis fingerprint protection.
+- Responsive, keyboard-accessible desktop and mobile interfaces.
+- An instant deterministic demonstration using 12 synthetic responses.
+
+## Demo
+
+- **Live app:** [https://class-trace-one.vercel.app](https://class-trace-one.vercel.app)
+- **Demo video:** [ADD PUBLIC YOUTUBE URL]
+
+Reviewers can open the prepared demonstration instantly without an OpenAI call. Live mode uses **Analyse with GPT-5.6** to perform a real structured analysis and may take approximately one to two minutes.
+
+1. Load the sample circle-area assessment.
+2. Open the prepared analysis or run the sample live.
+3. Inspect the Trace Map and a learner’s response evidence.
+4. Approve or adjust a reasoning pattern, then open the intervention.
+5. Complete the learner transfer check.
+6. Review the outcome and copy the JSON evidence export.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    A[Assessment question and rubric] --> B[Typed responses or de-identified images]
-    B --> C[GPT-5.6 structured individual analysis]
-    C --> D[Application evidence validation]
-    D --> E[GPT-5.6 cohort clustering]
-    E --> F[Deterministic membership normalization]
-    F --> G[Existing Trace Map and teacher review]
-    G --> H[GPT-5.6 intervention configuration]
-    H --> I[Trusted React activity components]
-    I --> J[Student answer and explanation]
-    J --> K[GPT-5.6 transfer evaluation]
-    K --> L[Before-and-after evidence]
+    A[Question, rubric, and de-identified responses] --> B[Two concurrent GPT-5.6 analysis batches]
+    B --> C[Exact-ID and verbatim-evidence validation]
+    C --> D[GPT-5.6 cohort clustering]
+    D --> E[Trace Map and teacher review]
+    E --> F[GPT-5.6 intervention configuration]
+    F --> G[Trusted React activity]
+    G --> H[GPT-5.6 transfer evaluation]
+    H --> I[Verified outcome and evidence export]
 ```
 
-OpenAI requests run only from Node.js API routes. The browser stores validated structured results and teacher edits in `localStorage`; uploaded image bytes are never persisted.
+### Frontend
 
-The live class workflow uses four bounded requests:
+- Next.js App Router and React
+- strict TypeScript
+- Tailwind CSS and application design tokens
+- trusted React intervention components
+- versioned, Zod-validated `localStorage` persistence
 
-1. One class-wide request reconstructs observable reasoning for up to 12 responses.
-2. One request clusters the validated individual analyses by shared reasoning evidence.
-3. One request configures an intervention after the teacher chooses a cluster.
-4. One request evaluates a submitted transfer answer and explanation.
+### AI workflow
 
-All requests use the Responses API, `model: "gpt-5.6"`, `store: false`, Zod schemas, `zodTextFormat`, `responses.parse`, and a 150-second SDK timeout. Automatic SDK retries are disabled so a failed request cannot silently duplicate an analysis; the class pipeline permits one explicit, missing-response-only repair request.
+- OpenAI Responses API with `gpt-5.6`
+- Structured Outputs using Zod and `zodTextFormat`
+- two concurrent six-response primary batches for the sample class
+- medium reasoning effort and SDK retries disabled
+- one bounded timeout fallback that splits only a timed-out six-response group into two concurrent three-response groups
+- cohort clustering after individual results pass validation
+- structured intervention generation and transfer evaluation
 
-## Phase 1 and Phase 2
+Primary analysis batches have a 95-second application timeout. If exactly one primary batch times out, its two fallback requests each have a 30-second timeout; the completed primary batch is retained. Clustering has its own bounded timeout, and the analysis route declares a 180-second Node.js duration.
 
-Phase 1 established the premium responsive interface, deterministic synthetic class, signature Trace Map, teacher workbench, circle explorer, student activity, and prepared outcomes.
+### Validation boundaries
 
-Phase 2 adds:
+- Request-specific schemas preserve the exact expected response IDs.
+- Global normalization rejects duplicate or missing membership.
+- Evidence excerpts must occur verbatim in the supplied work.
+- Low confidence and insufficient evidence can require teacher review.
+- Unreadable work is represented rather than silently omitted.
+- Executable intervention output is rejected; no arbitrary model-generated code runs.
 
-- server-only GPT-5.6 Responses API integration;
-- structured multimodal analysis for typed work and PNG, JPEG, or WebP images;
-- real application-stage NDJSON progress;
-- verbatim evidence verification and confidence thresholds;
-- deterministic cluster-membership normalization;
-- visible live/prepared provenance;
-- locally persisted approval, rename, move, review, merge, and restore controls;
-- validated intervention configuration rendered by trusted components;
-- live transfer evaluation based on answer and explanation;
-- safe, copyable JSON evidence export;
-- offline tests and an optional live evaluation harness.
+## How GPT-5.6 is used
 
-The prepared demonstration remains available without an API key and never silently replaces a failed live run.
+GPT-5.6 performs:
 
-## Setup
+- multimodal student-work interpretation;
+- observable reasoning reconstruction;
+- possible misconception hypotheses;
+- evidence-grounded cohort clustering;
+- intervention configuration; and
+- transfer evaluation.
+
+GPT-5.6 does not make final instructional decisions. Teachers inspect evidence, revise groupings, approve interventions, and decide what action is appropriate for their learners.
+
+## How Codex contributed
+
+Codex helped implement:
+
+- application architecture;
+- typed schemas and validation;
+- OpenAI integration and streaming orchestration;
+- timeout and recovery logic;
+- browser-local persistence and duplicate-cost protection;
+- UI components and responsive states;
+- automated tests and accessibility checks;
+- deployment readiness; and
+- documentation.
+
+**Codex /feedback Session ID:** `[ADD BEFORE SUBMISSION]`
+
+## Builder decisions
+
+The builder personally defined:
+
+- the teacher-first product direction;
+- the ClassTrace concept and scope;
+- evidence requirements and teacher-control boundaries;
+- the end-to-end product flow;
+- the visual direction;
+- the circle-area demonstration scenario;
+- privacy rules; and
+- the submission story.
+
+## Privacy, safety, and teacher control
+
+- Use only synthetic or de-identified student work.
+- Fixtures use labels such as `Learner 01` and contain no real student data.
+- Uploaded images are held only for the live request and are not persisted.
+- Image bytes, Base64 content, `File` objects, and object URLs are excluded from browser storage and evidence exports.
+- Student text is treated as untrusted content and cannot change the analysis task.
+- ClassTrace suggests possible reasoning patterns; teachers remain responsible for instructional decisions.
+- Low-confidence, ambiguous, or insufficient-evidence work can be routed to teacher review.
+- Model output configures a fixed set of trusted components; arbitrary generated code is never executed.
+
+## Live and prepared modes
+
+### Prepared demonstration
+
+- deterministic and immediate;
+- uses the bundled synthetic class;
+- makes no OpenAI request; and
+- is suitable for reviewers without an API key.
+
+### Live analysis
+
+- powered by GPT-5.6;
+- validates evidence and response membership before rendering;
+- includes model, timestamp, run ID, and review provenance;
+- typically takes approximately one to two minutes, although model latency varies; and
+- requires a server-side `OPENAI_API_KEY`.
+
+A failed live run is never silently replaced with prepared results.
+
+## Persistence and duplicate-cost protection
+
+ClassTrace stores an assessment draft under `classtrace:v1:assessment-draft` and the latest completed analysis snapshot under `classtrace:v1:latest-analysis`. The saved snapshot contains the validated run, teacher edits, approved intervention, transfer evaluation, and assessment fingerprint.
+
+Saved analyses can be resumed after refresh, navigation, or a browser restart without another OpenAI request. Before starting an identical live assessment, ClassTrace computes a SHA-256 fingerprint from the question, rubric, ordered typed responses, and safe image descriptors. It offers the existing result first; only **Run a new analysis anyway** starts another paid request.
+
+Persistence is browser- and origin-local, not cross-device. Clearing browser storage removes saved work. Image files themselves are not retained and must be reattached.
+
+## Local setup
 
 Requirements: Node.js 20.9 or newer and npm.
 
 ```bash
+git clone https://github.com/Rex739/ClassTrace.git
+cd ClassTrace
 npm install
 cp .env.example .env.local
 npm run dev
@@ -66,153 +198,72 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Environment variables:
+## Environment variables
 
 ```bash
 OPENAI_API_KEY=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-`OPENAI_API_KEY` is read only by server modules. The build and prepared demonstration do not require it.
+`OPENAI_API_KEY` is read only by server modules and must never be exposed to browser code. Use the complete deployed HTTPS origin for `NEXT_PUBLIC_APP_URL` in production.
 
-## Live and prepared modes
-
-- **Live analysis · GPT-5.6:** sends the supplied assessment and de-identified responses to the OpenAI Responses API and renders validated results in the existing Trace Map.
-- **Prepared demonstration · deterministic data:** uses the bundled 12-learner synthetic fixture and makes no model call.
-
-From `/assessments/new`, choose **Load sample inputs** followed by **Analyse with GPT-5.6** to run the synthetic class live. Choose **Open prepared demonstration** for the offline story.
-
-## Demo flow
-
-- `/` — product overview and Trace Map preview
-- `/assessments/new` — assessment, rubric, typed responses, image uploads, live progress and recoverable errors
-- `/analyses/demo` — deterministic analysis
-- `/analyses/live` — current validated live run
-- `/analyses/live/clusters/[clusterId]` — evidence and teacher adjustments
-- `/interventions/live` — GPT-5.6 configuration and teacher approval
-- `/learn/live` — trusted student activity and live transfer submission
-- `/analyses/live/outcomes` — transfer evidence and teacher recommendation
-
-The strongest quick demo is documented at the end of this README.
-
-## Privacy and product boundaries
-
-- Use synthetic or de-identified student work for this demonstration.
-- Fixtures use aliases such as `Learner 01`; they contain no real student data.
-- Images are validated in memory, sent directly for analysis, and not persisted by ClassTrace.
-- Raw image contents, prompts, API keys, and raw OpenAI responses are not logged or returned to the browser.
-- Student work is treated as untrusted content and is isolated with explicit prompt boundaries.
-- Exact evidence excerpts must occur verbatim in the supplied work or the run is rejected.
-- Low-confidence and unreadable work requires teacher review.
-- ClassTrace suggests possible reasoning patterns. Teachers remain responsible for instructional decisions.
-- The product never diagnoses intelligence, medical, psychological, behavioural, or neurodevelopmental conditions.
-
-## Structured outputs
-
-The server validates:
-
-- individual submission analyses, including readability, observable reasoning, verbatim evidence, alternatives, confidence, and review status;
-- cohort clusters, demonstrated understanding, teacher attention, intervention recommendation, and calculated summary counts;
-- a discriminated intervention union for circle explorer, comparison activity, worked example, or teacher review;
-- transfer status: `resolved`, `partially_resolved`, `unresolved`, or `uncertain`.
-
-Intervention output is configuration data only. ClassTrace rejects executable code, scripts, HTML, CSS, JSX, event handlers, and JavaScript URLs.
-
-## Quality checks and evaluation
+## Testing and evaluation
 
 ```bash
 npm run lint
 npm test
 npm run build
+npm run test:e2e
 npm run eval:classtrace
 ```
 
-The default test suite is offline and does not require an API key. `npm run eval:classtrace` always runs structural checks against the synthetic class. When `OPENAI_API_KEY` is present, it additionally runs the two-stage sample analysis with GPT-5.6.
+The normal unit and Playwright suites are offline and do not require an API key. The current repository suite contains **61 unit tests** and **20 Playwright cases** across desktop and mobile projects.
 
-The evaluation verifies representation of all 12 responses, duplicate membership, evidence presence, review thresholds, major prepared reasoning patterns, schema validity, and non-executable intervention output. It is a small hackathon evaluation, not a claim of general pedagogical validity; broader subjects, handwriting conditions, languages, and ambiguous work require further evaluation with educators.
+`npm run eval:classtrace` always performs structural checks against the synthetic class. With `OPENAI_API_KEY` configured, it additionally runs the live GPT-5.6 evaluation, consumes API credit, and can take several minutes. The prepared demonstration and normal test suites remain available without a key.
 
-Three consecutive live evaluation runs completed in **90.513 s**, **84.079 s**, and **82.633 s** (observed range **82.6–90.5 s**). Those measurements validate the two-stage synthetic class pipeline under the tested account and network conditions; they are not a latency guarantee. A later final browser pass reached the streamed reasoning stage but was blocked by an account-quota `429`; the UI exposes the failure rather than substituting fixture data, and distinguishes non-retryable quota exhaustion from a transient rate limit.
-
-Playwright-ready navigation tests are available with:
+If Playwright’s Chromium browser is not already installed:
 
 ```bash
 npx playwright install chromium
-npm run test:e2e
 ```
+
+## Verified live scenario
+
+The final circle-area playground scenario produced:
+
+- 12 responses analysed exactly once;
+- 5 possible misconception clusters;
+- 2 responses showing demonstrated understanding;
+- a targeted linear-scaling misconception;
+- a teacher-approved circle-area intervention; and
+- one transfer result resolved at 99% confidence.
+
+This is evidence from one completed learner transfer check. It does not establish whole-class learning improvement or broad pedagogical validity.
 
 ## Vercel deployment
 
-1. Push this repository to a Git provider.
-2. Import the repository into Vercel as a Next.js project.
-3. Set `OPENAI_API_KEY` as a protected server environment variable for Production and Preview.
-4. Set `NEXT_PUBLIC_APP_URL` to the deployed HTTPS origin.
-5. Deploy using the standard Next.js build command, `npm run build`.
-6. Ensure the selected Vercel plan permits the declared 180-second Node.js function duration.
-7. Verify `/analyses/demo` without an API key and then run a de-identified live analysis with the configured key.
-8. Confirm streamed NDJSON reaches the browser through the deployed edge path and that the live result carries the GPT-5.6 provenance badge.
-9. Generate and approve one intervention, submit one transfer response, and inspect the evidence export for secrets or image data.
+1. Import the GitHub repository into Vercel as a Next.js project.
+2. Add `OPENAI_API_KEY` as a protected Production and Preview variable.
+3. Set `NEXT_PUBLIC_APP_URL` to the complete deployed HTTPS origin.
+4. Confirm the plan supports the declared 180-second Node.js function duration.
+5. Deploy with the standard Next.js build command.
+6. Verify the prepared demonstration without an API key dependency.
+7. Run one de-identified production live smoke test and confirm provenance, streaming progress, and evidence export.
 
-No Cloudflare Workers or Sites adapter is used.
+The analysis routes use bounded request timeouts and a single application-level timeout fallback. Production latency can still vary with model load, network conditions, and account quota.
 
 ## Current limitations
 
-- The assessment draft is stored under `classtrace:v1:assessment-draft`; the latest completed live run, teacher edits, approved intervention, transfer evaluation, and duplicate-analysis fingerprint are stored as one validated snapshot under `classtrace:v1:latest-analysis`.
-- Persistence is browser-local for the current production origin. It survives refreshes, browser restarts, navigation, and normal same-domain Vercel redeployments, but it is not available across devices or browsers.
-- Clearing browser storage removes saved drafts and analyses. There is no server backup.
-- Uploaded image names, MIME types, sizes, and last-modified timestamps may be retained with a draft, but image bytes, `File` objects, Base64 data, and object URLs are never stored. Images must be reattached before a new analysis.
-- There is no authentication, database, class roster, or cross-device persistence.
-- The MVP accepts at most 12 responses and 5 MB per image.
-- Only the circle-area intervention is deeply interactive; other intervention types render structured teacher-reviewed cards.
-- A live transfer outcome represents the completed learner submission on this device rather than an entire class re-assessment batch.
-- Image quality and handwriting legibility still affect evidence quality; unreadable work is routed to teacher attention.
-- The optional live evaluation depends on account access to the `gpt-5.6` alias and consumes API usage.
-- Production uses concurrent 95-second primary analysis batches with one bounded concurrent 30-second fallback for only a timed-out group, plus reserved repair and clustering budgets below the route's 180-second duration. Production deployment should continue monitoring latency.
+- Persistence is browser-local; there is no authentication, database, server backup, or cross-device synchronization.
+- Only one latest completed analysis is retained per browser origin.
+- Clearing browser storage removes drafts and saved analyses.
+- Uploaded images must be reattached for a new run.
+- The MVP accepts up to 12 responses, with a maximum of 5 MB per image.
+- The circle-area explorer is the deeply interactive intervention example; other validated intervention types render structured teacher-reviewed activities.
+- Broader subjects, languages, handwriting conditions, and ambiguous work require further educator-led evaluation.
+- Model latency, account quota, and model access can affect live mode.
+- One learner’s transfer result does not represent the whole class.
 
-## How Codex and GPT-5.6 contributed
+## License
 
-Codex helped implement:
-
-- application architecture;
-- typed schemas;
-- OpenAI integration;
-- streaming orchestration;
-- UI components;
-- tests;
-- accessibility;
-- error handling;
-- evaluation tooling.
-
-The builder personally defined:
-
-- the teacher-first product direction;
-- misconception-evidence requirements;
-- human-review boundaries;
-- visual direction;
-- supported concept scope;
-- intervention workflow;
-- submission story.
-
-GPT-5.6 performs at runtime:
-
-- multimodal student-work interpretation;
-- observable reasoning reconstruction;
-- possible misconception hypotheses;
-- cohort pattern discovery;
-- intervention configuration;
-- transfer evaluation.
-
-Codex /feedback session ID: **[add before submission]**
-
-## Build Week evidence
-
-The repository contains the complete product implementation, explicit model alias, structured schemas, server-only request modules, streaming endpoint, deterministic fallback, teacher-edit store, intervention renderer, transfer evaluator, tests, evaluation command, and this implementation record. Git history and the Codex `/feedback` session can be included as supporting submission evidence.
-
-## Strongest three-minute demo
-
-1. **0:00–0:25 — Frame the problem.** Open `/assessments/new`, state “See how your class is thinking,” load the 12-response synthetic sample, and point out typed/image privacy guidance.
-2. **0:25–0:50 — Start live analysis.** Select **Analyse with GPT-5.6**. Narrate the seven streamed application stages, the active elapsed timer, and the one-to-two-minute expectation. Use a previously completed live run for a time-bounded stage presentation if the current call is still processing; never label the prepared mode as live.
-3. **0:50–1:25 — Read the Trace Map.** On `/analyses/live`, show the live GPT-5.6 provenance, 12 unique memberships, and why matching wrong answers can follow different evidence-grounded reasoning paths.
-4. **1:25–1:55 — Keep the teacher in control.** Open a cluster, compare an exact excerpt with the submitted response, show confidence and an alternative hypothesis, then approve, rename, or move one response. Restore the AI result to demonstrate reversibility.
-5. **1:55–2:25 — Turn evidence into action.** Generate a circle-area configuration, explain that executable model output is rejected, approve it, and open the trusted student renderer. Change the radius with keyboard controls and show area scaling update from the actual input.
-6. **2:25–2:50 — Verify transfer.** Submit a concise answer plus conceptual explanation. Show that GPT-5.6 evaluates reasoning, can preserve uncertainty, and routes confidence below 70% to teacher review.
-7. **2:50–3:00 — Close with evidence.** Open outcomes, emphasize that this is one completed transfer check—not whole-class improvement—and copy the safe JSON evidence package.
+No license file is currently included. Usage and redistribution terms have not yet been specified.
