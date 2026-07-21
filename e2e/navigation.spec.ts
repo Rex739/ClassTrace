@@ -220,3 +220,42 @@ test("demo and live navigation states remain exclusive after direct navigation a
     await expect(nav.getByRole("link", { name: "Demo analysis", includeHidden: true })).not.toHaveAttribute("aria-current", "page");
   }
 });
+
+test("assessment setup contains long saved-analysis content at common widths", async ({ page }) => {
+  const snapshot = savedSnapshot();
+  snapshot.run.assessment.question = `A deliberately long saved assessment question ${"with-an-unbroken-reasoning-title-".repeat(18)} asks learners to explain the relationship.`;
+  await page.goto("/assessments/new");
+  await page.evaluate((stored) => localStorage.setItem("classtrace:v1:latest-analysis", JSON.stringify(stored)), snapshot);
+
+  for (const width of [390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Resume latest analysis" })).toBeVisible();
+    const layout = await page.locator(".form-layout").evaluate((element) => {
+      const main = element.querySelector<HTMLElement>(".form-main")!;
+      const sidebar = element.querySelector<HTMLElement>(".form-sidebar")!;
+      const containers = [...element.querySelectorAll<HTMLElement>(".form-main, .form-sidebar, .resume-analysis-card, .resume-actions, .form-actions")];
+      const overflow = containers.flatMap((container) => {
+        const bounds = container.getBoundingClientRect();
+        return [...container.querySelectorAll<HTMLElement>(":scope > *, p, small, h2, button")]
+          .map((item) => {
+            const rect = item.getBoundingClientRect();
+            return { tag: item.tagName, text: item.textContent?.trim().slice(0, 50), left: rect.left, right: rect.right };
+          })
+          .filter((item) => item.left < bounds.left - 1 || item.right > bounds.right + 1);
+      });
+      return {
+        documentWidth: document.documentElement.scrollWidth,
+        viewportWidth: window.innerWidth,
+        mainTop: Math.round(main.getBoundingClientRect().top),
+        mainBottom: Math.round(main.getBoundingClientRect().bottom),
+        sidebarTop: Math.round(sidebar.getBoundingClientRect().top),
+        overflow,
+      };
+    });
+    expect(layout.documentWidth, `${width}px document overflow`).toBeLessThanOrEqual(layout.viewportWidth);
+    expect(layout.overflow, `${width}px escaped items`).toEqual([]);
+    if (width < 1100) expect(layout.sidebarTop).toBeGreaterThanOrEqual(layout.mainBottom - 1);
+    else expect(Math.abs(layout.sidebarTop - layout.mainTop)).toBeLessThanOrEqual(1);
+  }
+});
