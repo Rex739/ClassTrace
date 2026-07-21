@@ -61,3 +61,31 @@ test("core routes remain usable at the configured viewport", async ({ page }) =>
     expect(documentWidth, `${route}: ${JSON.stringify(overflow)}`).toBeLessThanOrEqual(viewport?.width ?? documentWidth);
   }
 });
+
+test("analysis provenance stays readable without overflowing its card", async ({ page }) => {
+  for (const width of [390, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/analyses/demo");
+    const card = page.locator(".provenance-card");
+    await expect(card).toBeVisible();
+    await expect(card.getByText("Mode", { exact: true })).toBeVisible();
+    await expect(card.getByText("Created", { exact: true })).toBeVisible();
+    await expect(card.getByText("Teacher review", { exact: true })).toBeVisible();
+
+    const overflow = await card.evaluate((element) => {
+      const cardRect = element.getBoundingClientRect();
+      return [...element.querySelectorAll<HTMLElement>(".provenance-card-header, dl > div, dt, dd, button")]
+        .map((item) => {
+          const rect = item.getBoundingClientRect();
+          const style = getComputedStyle(item);
+          const clipsOverflow = style.overflowX === "hidden" || style.overflowX === "clip";
+          return { tag: item.tagName, text: item.textContent?.trim().slice(0, 40), left: rect.left, right: rect.right, scrollWidth: item.scrollWidth, clientWidth: item.clientWidth, clipsOverflow };
+        })
+        .filter((item) => item.left < cardRect.left - 1 || item.right > cardRect.right + 1 || (!item.clipsOverflow && item.scrollWidth > item.clientWidth + 1));
+    });
+    expect(overflow, `${width}px: ${JSON.stringify(overflow)}`).toEqual([]);
+  }
+
+  const runId = page.locator(".provenance-run-id");
+  await expect(runId).toHaveAttribute("title", /.+/);
+});
