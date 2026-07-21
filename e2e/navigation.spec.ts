@@ -12,7 +12,12 @@ test("the prepared demo journey is navigable", async ({ page }) => {
 test("circle explorer responds to radius input", async ({ page }) => {
   await page.goto("/learn/demo");
   await page.getByRole("button", { name: "It quadruples" }).click();
+  await expect(page.getByRole("button", { name: "It quadruples" })).toHaveClass(/selected/);
   await page.getByRole("button", { name: /continue/i }).click();
+  const radius = page.getByRole("slider", { name: /Radius/ });
+  await radius.focus();
+  await radius.press("ArrowRight");
+  await expect(radius).toHaveValue("3.5");
   await page.getByRole("button", { name: "6 cm" }).click();
   await expect(page.getByText("4.00×")).toBeVisible();
 });
@@ -20,8 +25,39 @@ test("circle explorer responds to radius input", async ({ page }) => {
 test("assessment setup distinguishes live and prepared modes", async ({ page }) => {
   await page.goto("/assessments/new");
   await expect(page.getByRole("button", { name: "Analyse with GPT-5.6" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Open prepared demonstration" })).toBeVisible();
-  await page.getByRole("button", { name: "Open prepared demonstration" }).click();
+  const preparedButton = page.locator(".live-actions").getByRole("button", { name: "Open prepared demonstration" });
+  await expect(preparedButton).toBeVisible();
+  await preparedButton.click();
   await expect(page).toHaveURL(/\/analyses\/demo$/);
   await expect(page.getByText("Prepared demonstration · deterministic data").first()).toBeVisible();
+});
+
+test("assessment image input accepts supported work and rejects unsafe files", async ({ page }) => {
+  await page.goto("/assessments/new");
+  const upload = page.locator('input[type="file"]');
+  await upload.setInputFiles({ name: "synthetic-work.png", mimeType: "image/png", buffer: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]) });
+  await expect(page.getByText("0 typed · 1 images · 12 maximum")).toBeVisible();
+  await expect(page.getByText("synthetic-work.png", { exact: true })).toBeVisible();
+
+  await upload.setInputFiles({ name: "student.txt", mimeType: "text/plain", buffer: Buffer.from("not an image") });
+  await expect(page.getByText("Student-work images must be PNG, JPEG, or WebP.")).toBeVisible();
+
+  await upload.setInputFiles({ name: "oversized.png", mimeType: "image/png", buffer: Buffer.alloc(5 * 1024 * 1024 + 1) });
+  await expect(page.getByText("Each image must be 5 MB or smaller.")).toBeVisible();
+  await expect(page.getByText(/use synthetic or de-identified student work/i)).toBeVisible();
+});
+
+test("core routes remain usable at the configured viewport", async ({ page }) => {
+  const routes = ["/", "/assessments/new", "/analyses/demo", "/analyses/demo/clusters/linear-scaling", "/interventions/demo", "/learn/demo", "/analyses/demo/outcomes"];
+  for (const route of routes) {
+    await page.goto(route);
+    await expect(page.locator("h1").first()).toBeVisible();
+    const viewport = page.viewportSize();
+    const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const overflow = await page.evaluate(() => [...document.querySelectorAll<Element>("html, body, body *")]
+      .map((element) => ({ tag: element.tagName, className: element.getAttribute("class") ?? "", right: Math.round(element.getBoundingClientRect().right), width: Math.round(element.getBoundingClientRect().width) }))
+      .filter((element) => element.right > window.innerWidth + 1 || element.width > window.innerWidth + 1)
+      .slice(0, 8));
+    expect(documentWidth, `${route}: ${JSON.stringify(overflow)}`).toBeLessThanOrEqual(viewport?.width ?? documentWidth);
+  }
 });

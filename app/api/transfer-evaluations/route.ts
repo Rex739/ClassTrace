@@ -3,7 +3,7 @@ import { TransferRequestSchema } from "@/lib/ai/schemas";
 import { ClassTraceError, safeErrorPayload, toClassTraceError } from "@/lib/ai/errors";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 export async function POST(request: Request) {
   try {

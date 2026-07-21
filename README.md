@@ -32,7 +32,7 @@ The live class workflow uses four bounded requests:
 3. One request configures an intervention after the teacher chooses a cluster.
 4. One request evaluates a submitted transfer answer and explanation.
 
-All requests use the Responses API, `model: "gpt-5.6"`, `store: false`, Zod schemas, `zodTextFormat`, `responses.parse`, timeouts, and limited SDK retries.
+All requests use the Responses API, `model: "gpt-5.6"`, `store: false`, Zod schemas, `zodTextFormat`, `responses.parse`, and a 150-second SDK timeout. Automatic SDK retries are disabled so a failed request cannot silently duplicate an analysis; the class pipeline permits one explicit, missing-response-only repair request.
 
 ## Phase 1 and Phase 2
 
@@ -131,6 +131,8 @@ The default test suite is offline and does not require an API key. `npm run eval
 
 The evaluation verifies representation of all 12 responses, duplicate membership, evidence presence, review thresholds, major prepared reasoning patterns, schema validity, and non-executable intervention output. It is a small hackathon evaluation, not a claim of general pedagogical validity; broader subjects, handwriting conditions, languages, and ambiguous work require further evaluation with educators.
 
+Three consecutive live evaluation runs completed in **90.513 s**, **84.079 s**, and **82.633 s** (observed range **82.6–90.5 s**). Those measurements validate the two-stage synthetic class pipeline under the tested account and network conditions; they are not a latency guarantee. A later final browser pass reached the streamed reasoning stage but was blocked by an account-quota `429`; the UI exposes the failure rather than substituting fixture data, and distinguishes non-retryable quota exhaustion from a transient rate limit.
+
 Playwright-ready navigation tests are available with:
 
 ```bash
@@ -145,7 +147,10 @@ npm run test:e2e
 3. Set `OPENAI_API_KEY` as a protected server environment variable for Production and Preview.
 4. Set `NEXT_PUBLIC_APP_URL` to the deployed HTTPS origin.
 5. Deploy using the standard Next.js build command, `npm run build`.
-6. Verify `/analyses/demo` without an API key and then run a de-identified live analysis with the configured key.
+6. Ensure the selected Vercel plan permits the declared 180-second Node.js function duration.
+7. Verify `/analyses/demo` without an API key and then run a de-identified live analysis with the configured key.
+8. Confirm streamed NDJSON reaches the browser through the deployed edge path and that the live result carries the GPT-5.6 provenance badge.
+9. Generate and approve one intervention, submit one transfer response, and inspect the evidence export for secrets or image data.
 
 No Cloudflare Workers or Sites adapter is used.
 
@@ -158,6 +163,7 @@ No Cloudflare Workers or Sites adapter is used.
 - A live transfer outcome represents the completed learner submission on this device rather than an entire class re-assessment batch.
 - Image quality and handwriting legibility still affect evidence quality; unreadable work is routed to teacher attention.
 - The optional live evaluation depends on account access to the `gpt-5.6` alias and consumes API usage.
+- The normal two-request class pipeline completed in 82.6–90.5 seconds during stability testing. Because each sequential model request has a 150-second SDK timeout, two worst-case requests could approach or exceed a hosting platform execution limit even though the route declares 180 seconds. Production deployment must monitor this explicitly.
 
 ## How Codex and GPT-5.6 contributed
 
@@ -198,12 +204,12 @@ Codex /feedback session ID: **[add before submission]**
 
 The repository contains the complete product implementation, explicit model alias, structured schemas, server-only request modules, streaming endpoint, deterministic fallback, teacher-edit store, intervention renderer, transfer evaluator, tests, evaluation command, and this implementation record. Git history and the Codex `/feedback` session can be included as supporting submission evidence.
 
-## Strongest 60-second demo
+## Strongest three-minute demo
 
-1. Open `/assessments/new` and select **Load sample inputs**.
-2. Select **Analyse with GPT-5.6** and narrate the seven real application stages.
-3. On `/analyses/live`, point to the provenance badge and Trace Map: same task, distinct evidence-grounded reasoning routes.
-4. Open a cluster, show a verbatim excerpt and alternative hypothesis, then approve or move one response.
-5. Generate and approve the circle-area intervention.
-6. In the student view, change the radius, submit a transfer answer plus explanation, and open live outcomes.
-7. Close on the transfer status, confidence, teacher recommendation, and copyable JSON evidence record.
+1. **0:00–0:25 — Frame the problem.** Open `/assessments/new`, state “See how your class is thinking,” load the 12-response synthetic sample, and point out typed/image privacy guidance.
+2. **0:25–0:50 — Start live analysis.** Select **Analyse with GPT-5.6**. Narrate the seven streamed application stages, the active elapsed timer, and the one-to-two-minute expectation. Use a previously completed live run for a time-bounded stage presentation if the current call is still processing; never label the prepared mode as live.
+3. **0:50–1:25 — Read the Trace Map.** On `/analyses/live`, show the live GPT-5.6 provenance, 12 unique memberships, and why matching wrong answers can follow different evidence-grounded reasoning paths.
+4. **1:25–1:55 — Keep the teacher in control.** Open a cluster, compare an exact excerpt with the submitted response, show confidence and an alternative hypothesis, then approve, rename, or move one response. Restore the AI result to demonstrate reversibility.
+5. **1:55–2:25 — Turn evidence into action.** Generate a circle-area configuration, explain that executable model output is rejected, approve it, and open the trusted student renderer. Change the radius with keyboard controls and show area scaling update from the actual input.
+6. **2:25–2:50 — Verify transfer.** Submit a concise answer plus conceptual explanation. Show that GPT-5.6 evaluates reasoning, can preserve uncertainty, and routes confidence below 70% to teacher review.
+7. **2:50–3:00 — Close with evidence.** Open outcomes, emphasize that this is one completed transfer check—not whole-class improvement—and copy the safe JSON evidence package.

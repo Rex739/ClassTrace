@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileImage, LoaderCircle, UploadCloud, WandSparkles, X } from "lucide-react";
 import { assessmentSchema } from "@/lib/validation";
@@ -34,7 +34,14 @@ export function NewAssessmentForm() {
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
   const [activeStage, setActiveStage] = useState<string | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [apiError, setApiError] = useState<SafeApiError | null>(null);
+
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setElapsedSeconds((value) => value + 1), 1_000);
+    return () => window.clearInterval(timer);
+  }, [running]);
 
   const typedLines = responseText.split("\n").map((line) => line.trim()).filter(Boolean).slice(0, 12);
 
@@ -67,7 +74,7 @@ export function NewAssessmentForm() {
       return;
     }
     if (responseCount > 12) { setErrors({ responseCount: "ClassTrace supports up to 12 responses per analysis." }); return; }
-    setRunning(true); setApiError(null); setActiveStage("preparing");
+    setRunning(true); setApiError(null); setActiveStage("preparing"); setElapsedSeconds(0);
     try {
       const typedResponses = typedLines.map((text, index) => ({ responseId: `response-${String(index + 1).padStart(2, "0")}`, studentAlias: `Learner ${String(index + 1).padStart(2, "0")}`, responseText: text }));
       const imageResponses = files.map((_, index) => ({ responseId: `response-${String(typedResponses.length + index + 1).padStart(2, "0")}`, studentAlias: `Learner ${String(typedResponses.length + index + 1).padStart(2, "0")}`, fileIndex: index }));
@@ -114,7 +121,7 @@ export function NewAssessmentForm() {
         {apiError && <section className="analysis-error" role="alert"><strong>{apiError.code === "MISSING_API_KEY" ? "Live analysis is not configured" : "Live analysis did not complete"}</strong><p>{apiError.message}</p><div>{apiError.retryable && <Button type="button" variant="secondary" onClick={analyseLive}>Retry live analysis</Button>}<Button type="button" variant="ghost" onClick={() => router.push("/analyses/demo")}>Open prepared demonstration</Button></div></section>}
         <div className="form-actions live-actions"><Button type="button" onClick={analyseLive} disabled={running}>{running ? <LoaderCircle className="spinning" size={17} /> : <WandSparkles size={17} />}{running ? "Analysing with GPT-5.6" : "Analyse with GPT-5.6"}</Button><Button type="button" variant="secondary" onClick={() => router.push("/analyses/demo")}>Open prepared demonstration</Button></div>
       </div>
-      <aside><Card className="demo-option"><span className="demo-icon"><WandSparkles size={20} /></span><h2>Prepared sample, two modes</h2><p>Load the 12 synthetic circle responses and send them through GPT-5.6, or open the deterministic demonstration with no live model call.</p><Button type="button" variant="secondary" onClick={loadSampleInputs}>Load sample inputs</Button></Card>{running && <Card className="progress-card" aria-live="polite"><span className="eyebrow">Live analysis · GPT-5.6</span><ol>{progressStages.map(([id, label]) => { const activeIndex = progressStages.findIndex(([stage]) => stage === activeStage); const index = progressStages.findIndex(([stage]) => stage === id); return <li key={id} className={id === activeStage ? "active" : index < activeIndex ? "done" : ""}><span>{index < activeIndex ? "✓" : index + 1}</span>{label}</li>; })}</ol></Card>}<ProductBoundaryNote /></aside>
+      <aside><Card className="demo-option"><span className="demo-icon"><WandSparkles size={20} /></span><h2>Prepared sample, two modes</h2><p>Load the 12 synthetic circle responses and send them through GPT-5.6, or open the deterministic demonstration with no live model call.</p><p className="analysis-duration-note">Detailed class analysis usually takes about one to two minutes.</p><Button type="button" variant="secondary" onClick={loadSampleInputs}>Load sample inputs</Button></Card>{running && <Card className="progress-card" role="status" aria-live="polite" aria-atomic="true"><div className="progress-card-heading"><span className="eyebrow">Live analysis · GPT-5.6</span><strong>{elapsedSeconds}s elapsed</strong></div><p>ClassTrace is actively analysing. You can continue to use this page while the evidence is processed.</p><ol>{progressStages.map(([id, label]) => { const activeIndex = progressStages.findIndex(([stage]) => stage === activeStage); const index = progressStages.findIndex(([stage]) => stage === id); return <li key={id} className={id === activeStage ? "active" : index < activeIndex ? "done" : ""}><span>{index < activeIndex ? "✓" : index + 1}</span>{label}</li>; })}</ol></Card>}<ProductBoundaryNote /></aside>
     </div>
   );
 }

@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
+import OpenAI from "openai";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { InterventionRenderer } from "@/components/live-intervention-studio";
 import { AnalysisRequestSchema, buildSubmissionAnalysisBatchSchema, ClassAnalysisSchema, InterventionConfigSchema, SubmissionAnalysesSchema, TransferEvaluationSchema, type SubmissionAnalysis } from "@/lib/ai/schemas";
 import { normalizeClassAnalysis, normalizeSubmissionAnalyses, membershipProblems } from "@/lib/ai/normalize";
-import { buildIndividualAnalysisPrompt, containsExecutableInterventionContent, promptBoundaries } from "@/lib/ai/prompts";
+import { buildIndividualAnalysisPrompt, buildTransferPrompt, containsExecutableInterventionContent, promptBoundaries } from "@/lib/ai/prompts";
 import { validateImageFile } from "@/lib/ai/files";
-import { ClassTraceError, safeErrorPayload } from "@/lib/ai/errors";
-import { applyTeacherEdits, emptyTeacherEdits } from "@/lib/client-store";
+import { ClassTraceError, safeErrorPayload, toClassTraceError } from "@/lib/ai/errors";
+import { applyTeacherEdits, buildEvidenceExport, emptyTeacherEdits } from "@/lib/client-store";
 import { createPreparedAnalysisRun } from "@/lib/ai/prepared";
 import { getRunLabel } from "@/lib/run-provenance";
 import { getResponseRefusal } from "@/lib/ai/response";
-import { buildAndValidateAnalysisInputManifest, runSubmissionAnalysisWithRecovery, type SubmissionBatchResponse } from "@/lib/ai/submission-batch";
+import { buildAndValidateAnalysisInputManifest, mergeSubmissionBatchResponses, requestForResponseIds, runSubmissionAnalysisWithRecovery, type SubmissionBatchResponse } from "@/lib/ai/submission-batch";
 
 const request = AnalysisRequestSchema.parse({
   mode: "live",
@@ -105,6 +109,34 @@ describe("Phase 2 schemas and normalization", () => {
     ]);
   });
 
+  it("merges bounded batch results while global normalization rejects duplicates and missing IDs", () => {
+    const response = (items: SubmissionAnalysis[]): SubmissionBatchResponse => ({
+      status: "completed",
+      incompleteDetails: null,
+      usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+      outputParsed: { analyses: items },
+      refusal: null,
+      latencyMs: 5,
+      requestId: "req_test",
+      sdkRetryUsed: false,
+      applicationRepairUsed: false,
+    });
+    const merged = mergeSubmissionBatchResponses([response([analysis("r1")]), response([analysis("r2")])]);
+    expect(normalizeSubmissionAnalyses(merged.outputParsed, request).map((item) => item.responseId)).toEqual(["r1", "r2"]);
+    expect(merged.usage).toEqual({ inputTokens: 20, outputTokens: 40, totalTokens: 60 });
+
+    const duplicate = mergeSubmissionBatchResponses([response([analysis("r1")]), response([analysis("r1")])]);
+    expect(() => normalizeSubmissionAnalyses(duplicate.outputParsed, request)).toThrow(/more than once/);
+    const missing = mergeSubmissionBatchResponses([response([analysis("r1")])]);
+    expect(() => normalizeSubmissionAnalyses(missing.outputParsed, request)).toThrow(/omitted 1 response/);
+  });
+
+  it("creates exact request-specific subsets for bounded batches", () => {
+    const subset = requestForResponseIds(request, ["r2"]);
+    expect(subset.typedResponses.map((item) => item.responseId)).toEqual(["r2"]);
+    expect(subset.imageResponses).toEqual([]);
+  });
+
   it("throws a specific error for incomplete API responses without attempting repair", async () => {
     let calls = 0;
     const execute = async (): Promise<SubmissionBatchResponse> => {
@@ -137,6 +169,17 @@ describe("safety boundaries", () => {
     expect(prompt.content).toContain(`</${promptBoundaries.inputBoundary}>`);
   });
 
+  it("requires transfer evidence to be copied verbatim or omitted", () => {
+    const prompt = buildTransferPrompt({
+      targetMisconception: "Linear scaling",
+      learningObjective: "Explain squared scale factors.",
+      transferQuestion: { prompt: "How does area scale?", expectedConcepts: ["square scale factor"], scoringGuidance: "Require explanation." },
+      learnerAnswer: "Nine times",
+      learnerExplanation: "Because the radius scale factor is three and three squared is nine.",
+    });
+    expect(prompt.instructions).toContain("exact contiguous excerpt copied verbatim");
+  });
+
   it("includes every required response ID and directs unclear work to insufficient evidence", () => {
     const prompt = buildIndividualAnalysisPrompt({ ...request, imageAliases: [] });
     for (const item of request.typedResponses) {
@@ -147,9 +190,22 @@ describe("safety boundaries", () => {
     expect(manifest).toMatchObject({ expectedCount: 2, expectedIds: ["r1", "r2"], inputTypes: ["typed", "typed"] });
   });
 
-  it("validates intervention union variants and rejects executable content", () => {
-    const safe = InterventionConfigSchema.parse({ type: "teacher_review", title: "Clarify evidence", targetMisconception: "Uncertain", reason: "Evidence is incomplete", suggestedTeacherQuestion: "Can you explain this step?" });
-    expect(containsExecutableInterventionContent(safe)).toBe(false);
+  it("renders every intervention union variant and rejects executable content", () => {
+    const transferQuestion = { prompt: "How does the area scale?", expectedConcepts: ["square scale factor"], scoringGuidance: "Require a conceptual explanation." };
+    const variants = [
+      { type: "teacher_review", title: "Clarify evidence", targetMisconception: "Uncertain", reason: "Evidence is incomplete", suggestedTeacherQuestion: "Can you explain this step?" },
+      { type: "circle_area_explorer", title: "Explore circle area", targetMisconception: "Linear scaling", learningObjective: "Connect radius scale to area scale.", predictionPrompt: "What will happen?", startingRadius: 3, comparisonRadius: 6, explanationSteps: ["Compare the squared radii."], reflectionQuestion: "What changed?", transferQuestion },
+      { type: "comparison_activity", title: "Compare representations", targetMisconception: "Formula confusion", learningObjective: "Distinguish area and circumference.", comparisonPrompt: "Compare these expressions.", cases: [{ label: "Area", expression: "πr²", discussionPrompt: "What is squared?" }, { label: "Circumference", expression: "2πr", discussionPrompt: "What is linear?" }], reflectionQuestion: "How do they differ?", transferQuestion },
+      { type: "worked_example", title: "Trace an example", targetMisconception: "Substitution error", learningObjective: "Substitute before squaring.", problem: "Find the new area.", steps: [{ expression: "π(6²)", explanation: "Square the full radius." }], selfExplanationPrompt: "Why square 6?", transferQuestion },
+    ].map((value) => InterventionConfigSchema.parse(value));
+    for (const intervention of variants) {
+      expect(containsExecutableInterventionContent(intervention)).toBe(false);
+      const markup = renderToStaticMarkup(createElement(InterventionRenderer, { intervention }));
+      const marker = intervention.type === "teacher_review" ? intervention.reason : intervention.type === "circle_area_explorer" ? "Interactive model" : intervention.type === "comparison_activity" ? intervention.comparisonPrompt : intervention.problem;
+      expect(markup).toContain(marker);
+      expect(markup).not.toMatch(/<script|javascript:|onerror=|onclick=/i);
+    }
+    const safe = variants[0]!;
     expect(containsExecutableInterventionContent({ ...safe, reason: "<script>alert(1)</script>" })).toBe(true);
   });
 
@@ -158,10 +214,32 @@ describe("safety boundaries", () => {
     await expect(validateImageFile(good)).resolves.toMatchObject({ mimeType: "image/png" });
     const bad = new File(["text"], "work.txt", { type: "text/plain" });
     await expect(validateImageFile(bad)).rejects.toMatchObject({ code: "UNSUPPORTED_IMAGE" });
+    const oversized = new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.png", { type: "image/png" });
+    await expect(validateImageFile(oversized)).rejects.toMatchObject({ code: "IMAGE_TOO_LARGE" });
+  });
+
+  it("exports only the documented evidence package fields", () => {
+    const run = createPreparedAnalysisRun();
+    const payload = buildEvidenceExport(run, emptyTeacherEdits(), null, null);
+    expect(Object.keys(payload)).toEqual([
+      "assessment",
+      "validatedStructuredResults",
+      "teacherEdits",
+      "interventionConfiguration",
+      "transferOutcomes",
+      "runMetadata",
+    ]);
+    const serialized = JSON.stringify(payload);
+    for (const forbidden of ["OPENAI_API_KEY", "system_message", "developer_message", "data:image", "base64", "cookie"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    expect(() => buildEvidenceExport({ ...run, rawOpenAIResponse: { output: "secret" } } as typeof run, emptyTeacherEdits(), null, null)).toThrow();
   });
 
   it("returns safe API errors without raw objects", () => {
     expect(safeErrorPayload(new ClassTraceError("MISSING_API_KEY", "Configure the key.", false, 503))).toEqual({ code: "MISSING_API_KEY", message: "Configure the key.", retryable: false });
+    const quotaError = new OpenAI.RateLimitError(429, { code: "insufficient_quota", message: "quota exceeded" }, "quota exceeded", new Headers());
+    expect(toClassTraceError(quotaError)).toMatchObject({ code: "RATE_LIMITED", retryable: false, message: expect.stringContaining("quota") });
     expect(getResponseRefusal({ output: [{ content: [{ type: "refusal", refusal: "Cannot analyse" }] }] })).toBe("Cannot analyse");
   });
 

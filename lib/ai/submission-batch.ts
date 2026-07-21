@@ -63,6 +63,50 @@ export type SubmissionBatchStageObserver = (event: {
   outcome: "running" | "completed" | "failed";
 }) => void;
 
+export function requestForResponseIds(request: AnalysisRequest, responseIds: string[]): AnalysisRequest {
+  const wanted = new Set(responseIds);
+  return {
+    ...request,
+    typedResponses: request.typedResponses.filter((item) => wanted.has(item.responseId)),
+    imageResponses: request.imageResponses.filter((item) => wanted.has(item.responseId)),
+  };
+}
+
+export function mergeSubmissionBatchResponses(responses: SubmissionBatchResponse[]): SubmissionBatchResponse {
+  const parsed = responses.map((response) => SubmissionAnalysesSchema.safeParse(response.outputParsed));
+  const failedIndex = responses.findIndex((response, index) => response.status !== "completed" || response.refusal || !parsed[index]?.success);
+  const usage = responses.every((response) => response.usage)
+    ? responses.reduce<SafeUsage>((total, response) => ({
+        inputTokens: total.inputTokens + response.usage!.inputTokens,
+        outputTokens: total.outputTokens + response.usage!.outputTokens,
+        totalTokens: total.totalTokens + response.usage!.totalTokens,
+      }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 })
+    : null;
+
+  if (failedIndex >= 0) {
+    const failed = responses[failedIndex]!;
+    return {
+      ...failed,
+      usage,
+      latencyMs: Math.max(...responses.map((response) => response.latencyMs)),
+      sdkRetryUsed: responses.some((response) => response.sdkRetryUsed),
+      applicationRepairUsed: responses.some((response) => response.applicationRepairUsed),
+    };
+  }
+
+  return {
+    status: "completed",
+    incompleteDetails: null,
+    usage,
+    outputParsed: { analyses: parsed.flatMap((result) => result.success ? result.data.analyses : []) },
+    refusal: null,
+    latencyMs: Math.max(...responses.map((response) => response.latencyMs)),
+    requestId: responses.map((response) => response.requestId).filter(Boolean).join(",") || null,
+    sdkRetryUsed: responses.some((response) => response.sdkRetryUsed),
+    applicationRepairUsed: responses.some((response) => response.applicationRepairUsed),
+  };
+}
+
 function submissions(request: AnalysisRequest) {
   return [
     ...request.typedResponses.map((item) => ({ responseId: item.responseId, studentAlias: item.studentAlias, inputType: "typed" as const })),
@@ -124,15 +168,6 @@ function assertCompleted(response: SubmissionBatchResponse) {
   }
 }
 
-function requestForIds(request: AnalysisRequest, responseIds: string[]): AnalysisRequest {
-  const wanted = new Set(responseIds);
-  return {
-    ...request,
-    typedResponses: request.typedResponses.filter((item) => wanted.has(item.responseId)),
-    imageResponses: request.imageResponses.filter((item) => wanted.has(item.responseId)),
-  };
-}
-
 function missingIds(raw: unknown, expectedIds: string[]): string[] {
   const parsed = SubmissionAnalysesSchema.safeParse(raw);
   if (!parsed.success) return [];
@@ -168,7 +203,7 @@ export async function runSubmissionAnalysisWithRecovery(
     const repairStartedAt = Date.now();
     observeStage?.({ stage: "missing-id-repair", phase: "start", timestamp: new Date(repairStartedAt).toISOString(), durationMs: null, outcome: "running" });
     try {
-      const repairRequest = requestForIds(request, missing);
+      const repairRequest = requestForResponseIds(request, missing);
       const repair = await execute(repairRequest, missing, "repair");
       assertCompleted(repair);
       const repairParsed = SubmissionAnalysesSchema.parse(repair.outputParsed);

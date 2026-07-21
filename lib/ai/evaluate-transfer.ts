@@ -23,6 +23,10 @@ export async function evaluateTransfer(input: TransferRequest): Promise<Transfer
   if (getResponseRefusal(response)) throw new ClassTraceError("MODEL_REFUSAL", "GPT-5.6 declined to evaluate this transfer response. Ask the teacher to review it directly.", false, 422);
   if (!response.output_parsed) throw new ClassTraceError("MALFORMED_OUTPUT", "GPT-5.6 did not return a valid transfer evaluation.", true, 502);
   const parsed = TransferEvaluationSchema.parse(response.output_parsed);
-  if (parsed.evidenceExcerpt && !`${input.learnerAnswer}\n${input.learnerExplanation}`.includes(parsed.evidenceExcerpt)) throw new ClassTraceError("MALFORMED_OUTPUT", "Transfer evidence was not found verbatim in the learner submission.", true, 502);
-  return TransferEvaluationSchema.parse({ ...parsed, requiresTeacherReview: parsed.requiresTeacherReview || parsed.confidence < 0.7 });
+  const evidenceIsVerbatim = !parsed.evidenceExcerpt || `${input.learnerAnswer}\n${input.learnerExplanation}`.includes(parsed.evidenceExcerpt);
+  return TransferEvaluationSchema.parse({
+    ...parsed,
+    evidenceExcerpt: evidenceIsVerbatim ? parsed.evidenceExcerpt : null,
+    requiresTeacherReview: parsed.requiresTeacherReview || parsed.confidence < 0.7 || !evidenceIsVerbatim,
+  });
 }

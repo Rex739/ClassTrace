@@ -11,6 +11,8 @@ import { getResponseRefusal } from "@/lib/ai/response";
 import {
   buildAndValidateAnalysisInputManifest,
   inspectSubmissionBatchResponse,
+  mergeSubmissionBatchResponses,
+  requestForResponseIds,
   runSubmissionAnalysisWithRecovery,
   type SubmissionBatchExecutor,
 } from "@/lib/ai/submission-batch";
@@ -82,7 +84,15 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
     }
     return result;
   };
-  const { analyses: individualAnalyses } = await runSubmissionAnalysisWithRecovery(request, executeIndividualBatch);
+  const executeWithBoundedBatching: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt) => {
+    if (attempt !== "primary" || responseIds.length <= 6) {
+      return executeIndividualBatch(batchRequest, responseIds, attempt);
+    }
+    const responseIdBatches = [responseIds.slice(0, 6), responseIds.slice(6)];
+    const results = await Promise.all(responseIdBatches.map((ids) => executeIndividualBatch(requestForResponseIds(batchRequest, ids), ids, attempt)));
+    return mergeSubmissionBatchResponses(results);
+  };
+  const { analyses: individualAnalyses } = await runSubmissionAnalysisWithRecovery(request, executeWithBoundedBatching);
 
   report("clustering", "Discovering shared reasoning patterns");
   const clusterPrompt = buildClusteringPrompt({ question: request.question, analyses: individualAnalyses });

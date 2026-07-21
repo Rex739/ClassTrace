@@ -30,7 +30,10 @@ export function toClassTraceError(error: unknown): ClassTraceError {
   if (error instanceof ClassTraceError) return error;
   if (error instanceof z.ZodError) return new ClassTraceError("MALFORMED_OUTPUT", "The model response did not match the required evidence structure.", true, 502);
   if (error instanceof OpenAI.APIConnectionTimeoutError) return new ClassTraceError("API_TIMEOUT", "The live analysis took too long. Please retry.", true, 504);
-  if (error instanceof OpenAI.RateLimitError) return new ClassTraceError("RATE_LIMITED", "Live analysis is temporarily rate limited. Wait briefly, then retry.", true, 429);
+  if (error instanceof OpenAI.RateLimitError) {
+    if (error.code === "insufficient_quota") return new ClassTraceError("RATE_LIMITED", "Live GPT-5.6 quota is unavailable. Check the API plan and billing before trying again.", false, 429);
+    return new ClassTraceError("RATE_LIMITED", "Live analysis is temporarily rate limited. Wait briefly, then retry.", true, 429);
+  }
   if (error instanceof OpenAI.APIConnectionError) return new ClassTraceError("NETWORK_INTERRUPTION", "The connection to the analysis service was interrupted.", true, 503);
   if (error instanceof OpenAI.APIError) {
     const retryable = error.status === 408 || error.status === 409 || error.status === 429 || (error.status ?? 0) >= 500;

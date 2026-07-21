@@ -105,7 +105,11 @@ export function loadTransferEvaluation(): TransferEvaluation | null {
 }
 
 export function buildEvidenceExport(run: AnalysisRun, edits: TeacherEdits, intervention: InterventionConfig | null, transfer: TransferEvaluation | null) {
-  return { assessment: run.assessment, validatedStructuredResults: { individualAnalyses: run.individualAnalyses, classAnalysis: run.classAnalysis }, teacherEdits: edits, interventionConfiguration: intervention, transferOutcomes: transfer, runMetadata: run.metadata };
+  const validatedRun = AnalysisRunSchema.parse(run);
+  const validatedEdits = TeacherEditsSchema.parse(edits);
+  const validatedIntervention = intervention ? InterventionConfigSchema.parse(intervention) : null;
+  const validatedTransfer = transfer ? TransferEvaluationSchema.parse(transfer) : null;
+  return { assessment: validatedRun.assessment, validatedStructuredResults: { individualAnalyses: validatedRun.individualAnalyses, classAnalysis: validatedRun.classAnalysis }, teacherEdits: validatedEdits, interventionConfiguration: validatedIntervention, transferOutcomes: validatedTransfer, runMetadata: validatedRun.metadata };
 }
 
 export const clientStoreKeys = { run: RUN_KEY, edits: EDITS_KEY, intervention: INTERVENTION_KEY, transfer: TRANSFER_KEY };
