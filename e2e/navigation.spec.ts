@@ -1,4 +1,49 @@
 import { expect, test } from "@playwright/test";
+import { createPreparedAnalysisRun } from "../lib/ai/prepared";
+import { createAssessmentFingerprint } from "../lib/client-store";
+
+const storedLiveRun = (() => {
+  const prepared = createPreparedAnalysisRun();
+  return {
+    ...prepared,
+    metadata: { ...prepared.metadata, runId: "saved-live-e2e", mode: "live" as const, model: "gpt-5.6" as const },
+  };
+})();
+
+function savedSnapshot(fingerprint: string | null = null) {
+  const clusterId = storedLiveRun.classAnalysis.clusters[0]!.id;
+  return {
+    version: 1,
+    fingerprint,
+    run: storedLiveRun,
+    teacherEdits: {
+      approvedResponseIds: [storedLiveRun.individualAnalyses[0]!.responseId],
+      reviewResponseIds: [],
+      clusterRenames: [{ clusterId, title: "Teacher-confirmed scaling pattern" }],
+      responseMoves: [],
+      clusterMerges: [],
+      updatedAt: new Date().toISOString(),
+    },
+    approvedIntervention: {
+      type: "teacher_review",
+      title: "Check the explanation",
+      targetMisconception: "Scaling",
+      reason: "Confirm the learner's explanation.",
+      suggestedTeacherQuestion: "What is squared in the area formula?",
+    },
+    transferEvaluation: {
+      status: "partially_resolved",
+      demonstratedConcepts: ["Uses a squared scale factor"],
+      remainingDifficulty: "Needs to connect both radius factors.",
+      evidenceExcerpt: null,
+      feedbackForStudent: "Explain why the scale factor is squared.",
+      recommendationForTeacher: "Ask for a symbolic explanation.",
+      confidence: .82,
+      requiresTeacherReview: false,
+    },
+    savedAt: new Date().toISOString(),
+  };
+}
 
 test("the prepared demo journey is navigable", async ({ page }) => {
   await page.goto("/");
@@ -88,4 +133,71 @@ test("analysis provenance stays readable without overflowing its card", async ({
 
   const runId = page.locator(".provenance-run-id");
   await expect(runId).toHaveAttribute("title", /.+/);
+});
+
+test("assessment drafts and completed live work survive navigation and refresh without API calls", async ({ page }) => {
+  await page.goto("/assessments/new");
+  await page.getByRole("textbox", { name: "Question", exact: true }).fill("A circle has a radius of 3 cm. What happens to its area when the radius is doubled?");
+  await page.getByLabel("Reasoning guide or rubric").fill("Use area equals pi times radius squared and explain why the scale factor is squared.");
+  await page.getByLabel("Typed responses").fill("It becomes four times as large because two squared is four.");
+  await page.waitForTimeout(350);
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "Question", exact: true })).toHaveValue(/radius of 3 cm/);
+  await expect(page.getByLabel("Reasoning guide or rubric")).toHaveValue(/scale factor is squared/);
+  await expect(page.getByLabel("Typed responses")).toHaveValue(/four times as large/);
+
+  await page.evaluate((snapshot) => localStorage.setItem("classtrace:v1:latest-analysis", JSON.stringify(snapshot)), savedSnapshot());
+  let analysisRequests = 0;
+  page.on("request", (request) => { if (request.url().includes("/api/analyses")) analysisRequests += 1; });
+  await page.goto("/analyses/live");
+  await expect(page.getByRole("heading", { name: "Class reasoning analysis" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Teacher-confirmed scaling pattern" })).toBeVisible();
+  await expect(page.getByText("Live analysis · GPT-5.6").first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Teacher-confirmed scaling pattern" })).toBeVisible();
+  await page.goto("/assessments/new");
+  await page.getByRole("button", { name: "Resume latest analysis" }).click();
+  await expect(page).toHaveURL(/\/analyses\/live$/);
+  expect(analysisRequests).toBe(0);
+});
+
+test("duplicate-cost confirmation blocks automatic requests and deliberate rerun starts only one", async ({ page }) => {
+  const question = "A circle has a radius of 3 cm. What happens to its area when the radius is doubled?";
+  const expectedReasoning = "Use area equals pi times radius squared and explain why the scale factor is squared.";
+  const typedResponse = "It becomes four times as large because two squared is four.";
+  const fingerprint = await createAssessmentFingerprint({ question, expectedReasoning, typedResponses: [typedResponse], imageDescriptors: [] });
+  await page.goto("/assessments/new");
+  await page.evaluate((snapshot) => localStorage.setItem("classtrace:v1:latest-analysis", JSON.stringify(snapshot)), savedSnapshot(fingerprint));
+  await page.reload();
+  await page.getByRole("textbox", { name: "Question", exact: true }).fill(question);
+  await page.getByLabel("Reasoning guide or rubric").fill(expectedReasoning);
+  await page.getByLabel("Typed responses").fill(typedResponse);
+
+  let analysisRequests = 0;
+  await page.route("**/api/analyses", async (route) => {
+    analysisRequests += 1;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: `${JSON.stringify({ type: "result", data: storedLiveRun })}\n` });
+  });
+
+  await page.getByRole("button", { name: "Analyse with GPT-5.6" }).click();
+  await expect(page.getByText("This assessment has already been analysed.")).toBeVisible();
+  expect(analysisRequests).toBe(0);
+  await page.getByRole("button", { name: "Run a new analysis anyway" }).dblclick();
+  await expect(page).toHaveURL(/\/analyses\/live$/);
+  expect(analysisRequests).toBe(1);
+});
+
+test("deleting a saved analysis requires explicit confirmation", async ({ page }) => {
+  await page.goto("/assessments/new");
+  await page.evaluate((snapshot) => localStorage.setItem("classtrace:v1:latest-analysis", JSON.stringify(snapshot)), savedSnapshot());
+  await page.reload();
+  await page.getByRole("button", { name: "Delete saved analysis" }).click();
+  await expect(page.getByRole("alertdialog", { name: "Delete saved analysis" })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("classtrace:v1:latest-analysis"))).not.toBeNull();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("classtrace:v1:latest-analysis"))).not.toBeNull();
+  await page.getByRole("button", { name: "Delete saved analysis" }).click();
+  await page.getByRole("alertdialog", { name: "Delete saved analysis" }).getByRole("button", { name: "Delete saved analysis" }).click();
+  expect(await page.evaluate(() => localStorage.getItem("classtrace:v1:latest-analysis"))).toBeNull();
 });

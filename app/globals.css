@@ -375,6 +375,17 @@ h2 { font-size: clamp(1.55rem, 2.8vw, 2.25rem); line-height: 1.12; }
 .analysis-error strong { color: var(--red); }
 .analysis-error p { margin: 5px 0 12px; color: #76504d; font-size: .84rem; }
 .analysis-error > div { display: flex; gap: 8px; }
+.storage-notice { margin: 18px 28px 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-deep); color: var(--muted); font-size: .84rem; }
+.resume-analysis-card { margin: 22px 28px 0; padding: 20px; display: grid; gap: 16px; border-left: 3px solid var(--green); }
+.resume-analysis-card .eyebrow { display: flex; align-items: center; gap: 6px; color: var(--green); }
+.resume-analysis-card h2 { margin: 7px 0; font-size: 1.2rem; }
+.resume-analysis-card p { margin: 0 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resume-analysis-card small { color: var(--muted); }
+.resume-actions, .duplicate-analysis-panel > div, .confirmation-panel > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.duplicate-analysis-panel, .confirmation-panel { margin: 16px 28px; padding: 16px; border-radius: 10px; }
+.duplicate-analysis-panel { border: 1px solid #b8cce8; background: var(--blue-soft); }
+.duplicate-analysis-panel p, .confirmation-panel p { margin: 5px 0 12px; color: var(--muted); font-size: .84rem; }
+.confirmation-panel { border: 1px solid #e3c8a0; background: var(--amber-soft); }
 .progress-card { margin-top: 16px; padding: 20px; }
 .progress-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .progress-card-heading > strong { color: var(--blue-dark); font-size: .78rem; font-variant-numeric: tabular-nums; }
@@ -506,6 +517,7 @@ h2 { font-size: clamp(1.55rem, 2.8vw, 2.25rem); line-height: 1.12; }
   .transfer-input-grid { grid-template-columns: 1fr; }
   .outcome-context { grid-template-columns: 1fr; }
   .analysis-error { margin: 14px; }
+  .storage-notice, .resume-analysis-card, .duplicate-analysis-panel, .confirmation-panel { margin-left: 14px; margin-right: 14px; }
 }
 
 @media (min-width: 640px) {

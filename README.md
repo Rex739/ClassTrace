@@ -156,14 +156,17 @@ No Cloudflare Workers or Sites adapter is used.
 
 ## Current limitations
 
-- One current live class run, intervention, and transfer evaluation are stored per browser.
+- The assessment draft is stored under `classtrace:v1:assessment-draft`; the latest completed live run, teacher edits, approved intervention, transfer evaluation, and duplicate-analysis fingerprint are stored as one validated snapshot under `classtrace:v1:latest-analysis`.
+- Persistence is browser-local for the current production origin. It survives refreshes, browser restarts, navigation, and normal same-domain Vercel redeployments, but it is not available across devices or browsers.
+- Clearing browser storage removes saved drafts and analyses. There is no server backup.
+- Uploaded image names, MIME types, sizes, and last-modified timestamps may be retained with a draft, but image bytes, `File` objects, Base64 data, and object URLs are never stored. Images must be reattached before a new analysis.
 - There is no authentication, database, class roster, or cross-device persistence.
 - The MVP accepts at most 12 responses and 5 MB per image.
 - Only the circle-area intervention is deeply interactive; other intervention types render structured teacher-reviewed cards.
 - A live transfer outcome represents the completed learner submission on this device rather than an entire class re-assessment batch.
 - Image quality and handwriting legibility still affect evidence quality; unreadable work is routed to teacher attention.
 - The optional live evaluation depends on account access to the `gpt-5.6` alias and consumes API usage.
-- The normal two-request class pipeline completed in 82.6–90.5 seconds during stability testing. Because each sequential model request has a 150-second SDK timeout, two worst-case requests could approach or exceed a hosting platform execution limit even though the route declares 180 seconds. Production deployment must monitor this explicitly.
+- Production uses concurrent 95-second primary analysis batches with one bounded concurrent 30-second fallback for only a timed-out group, plus reserved repair and clustering budgets below the route's 180-second duration. Production deployment should continue monitoring latency.
 
 ## How Codex and GPT-5.6 contributed
 

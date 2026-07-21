@@ -12,6 +12,7 @@ import { countSecureUnderstanding, getAttentionQueue } from "@/lib/analysis";
 import { ProductBoundaryNote } from "@/components/product-boundary-note";
 import { ProvenanceCard } from "@/components/provenance-card";
 import { createPreparedAnalysisRun } from "@/lib/ai/prepared";
+import { TeacherReviewStatus } from "@/components/teacher-review-status";
 
 export const metadata = { title: "Demo analysis" };
 
@@ -26,7 +27,7 @@ export default function AnalysisPage() {
     <section className="metrics" aria-label="Analysis summary"><article><span><Users size={18} /></span><div><strong>12</strong><small>responses traced</small></div></article><article><span><AlertTriangle size={18} /></span><div><strong>4</strong><small>shared learning needs</small></div></article><article><span><CheckCircle2 size={18} /></span><div><strong>{secure}</strong><small>secure understanding</small></div></article><article><span><Clock3 size={18} /></span><div><strong>3</strong><small>teacher checks</small></div></article></section>
     <TraceMap />
     <section><div className="section-heading-row"><div><span className="eyebrow">Learning-need groups</span><h2>Possible misconception clusters</h2></div><p>Ordered by instructional leverage, not score.</p></div><div className="cluster-grid">{clusters.map((cluster) => <ClusterCard key={cluster.id} cluster={cluster} />)}</div></section>
-    <div className="analysis-lower"><section className="attention-queue"><div className="section-heading-row"><div><span className="eyebrow">Teacher attention</span><h2>Three interpretations to check</h2></div><Badge tone="amber">Teacher review required</Badge></div><div>{attention.map((item) => { const response = getResponse(item.responseId); const student = response ? getStudent(response.studentId) : undefined; return response && student ? <Link key={item.responseId} href={`/analyses/demo/clusters/${item.clusterId}`}><span className="student-monogram">{student.label.slice(-2)}</span><span><strong>{student.label}</strong><small>{item.summary}</small></span><Badge tone="amber">{item.confidence}</Badge><ArrowRight size={16} /></Link> : null; })}</div></section><section className="pipeline-card"><span className="eyebrow">Analysis record</span><h2>How this trace was built</h2><AnalysisPipeline /></section></div>
+    <div className="analysis-lower"><section className="attention-queue"><div className="section-heading-row"><div><span className="eyebrow">Teacher attention</span><h2>Three interpretations to check</h2></div><TeacherReviewStatus count={attention.length} /></div><div>{attention.map((item) => { const response = getResponse(item.responseId); const student = response ? getStudent(response.studentId) : undefined; return response && student ? <Link key={item.responseId} href={`/analyses/demo/clusters/${item.clusterId}`}><span className="student-monogram">{student.label.slice(-2)}</span><span><strong>{student.label}</strong><small>{item.summary}</small></span><Badge tone="amber">{item.confidence}</Badge><ArrowRight size={16} /></Link> : null; })}</div></section><section className="pipeline-card"><span className="eyebrow">Analysis record</span><h2>How this trace was built</h2><AnalysisPipeline /></section></div>
     <ProvenanceCard run={preparedRun} />
   </div></AppShell>;
 }

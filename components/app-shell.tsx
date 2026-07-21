@@ -1,9 +1,13 @@
+"use client";
+
 import Link from "next/link";
-import { BarChart3, FilePlus2, Home, Menu } from "lucide-react";
+import { BarChart3, FilePlus2, History, Home, Menu } from "lucide-react";
 import type { ReactNode } from "react";
 import { Logo } from "@/components/logo";
+import { useAnalysisRun } from "@/lib/use-client-store";
 
 export function AppShell({ children, active = "analysis" }: { children: ReactNode; active?: "home" | "new" | "analysis" }) {
+  const savedRun = useAnalysisRun();
   return (
     <div className="app-frame">
       <header className="app-header">
@@ -12,6 +16,7 @@ export function AppShell({ children, active = "analysis" }: { children: ReactNod
           <Link className={active === "home" ? "active" : ""} href="/"><Home size={16} /> Home</Link>
           <Link className={active === "new" ? "active" : ""} href="/assessments/new"><FilePlus2 size={16} /> New assessment</Link>
           <Link className={active === "analysis" ? "active" : ""} href="/analyses/demo"><BarChart3 size={16} /> Demo analysis</Link>
+          {savedRun?.metadata.mode === "live" && <Link href="/analyses/live"><History size={16} /> Resume analysis</Link>}
         </nav>
         <details className="mobile-menu">
           <summary aria-label="Open navigation"><Menu size={20} /></summary>
@@ -19,6 +24,7 @@ export function AppShell({ children, active = "analysis" }: { children: ReactNod
             <Link href="/">Home</Link>
             <Link href="/assessments/new">New assessment</Link>
             <Link href="/analyses/demo">Demo analysis</Link>
+            {savedRun?.metadata.mode === "live" && <Link href="/analyses/live">Resume analysis</Link>}
           </nav>
         </details>
       </header>
