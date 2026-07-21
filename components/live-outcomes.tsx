@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { ProductBoundaryNote } from "@/components/product-boundary-note";
 import { ProvenanceCard } from "@/components/provenance-card";
+import { TransferDifficultyDetail } from "@/components/transfer-difficulty-detail";
 import { useAnalysisRun, useIntervention, useTransferEvaluation } from "@/lib/use-client-store";
 
 export function LiveOutcomes() {
@@ -65,7 +66,7 @@ export function LiveOutcomes() {
               <h2>{evaluation.evidenceExcerpt ? `“${evaluation.evidenceExcerpt}”` : "No sufficiently specific excerpt was available."}</h2>
               <dl className="outcome-context">
                 <div><dt>Original target</dt><dd>{intervention?.targetMisconception ?? "The teacher-approved intervention target"}</dd></div>
-                <div><dt>Remaining difficulty</dt><dd>{evaluation.remainingDifficulty ?? "No remaining difficulty was identified in this transfer response."}</dd></div>
+                <TransferDifficultyDetail status={evaluation.status} remainingDifficulty={evaluation.remainingDifficulty} />
               </dl>
             </section>
           </>
