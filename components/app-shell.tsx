@@ -1,30 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { BarChart3, FilePlus2, History, Home, Menu } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { BarChart3, FilePlus2, History, Home, Menu, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Logo } from "@/components/logo";
 import { useAnalysisRun } from "@/lib/use-client-store";
+import { navigationGroupForPath, type NavigationGroup } from "@/lib/navigation";
 
-export function AppShell({ children, active = "analysis" }: { children: ReactNode; active?: "home" | "new" | "analysis" }) {
+const navigationItems: Array<{ href: string; label: string; group: NavigationGroup; icon: LucideIcon }> = [
+  { href: "/", label: "Home", group: "home", icon: Home },
+  { href: "/assessments/new", label: "New assessment", group: "assessment", icon: FilePlus2 },
+  { href: "/analyses/demo", label: "Demo analysis", group: "demo", icon: BarChart3 },
+];
+
+export function AppShell({ children }: { children: ReactNode; active?: "home" | "new" | "analysis" }) {
   const savedRun = useAnalysisRun();
+  const activeGroup = navigationGroupForPath(usePathname());
+  const items = savedRun?.metadata.mode === "live"
+    ? [...navigationItems, { href: "/analyses/live", label: "Resume analysis", group: "live" as const, icon: History }]
+    : navigationItems;
   return (
     <div className="app-frame">
       <header className="app-header">
         <Link href="/" aria-label="ClassTrace home"><Logo /></Link>
         <nav aria-label="Primary navigation" className="desktop-nav">
-          <Link className={active === "home" ? "active" : ""} href="/"><Home size={16} /> Home</Link>
-          <Link className={active === "new" ? "active" : ""} href="/assessments/new"><FilePlus2 size={16} /> New assessment</Link>
-          <Link className={active === "analysis" ? "active" : ""} href="/analyses/demo"><BarChart3 size={16} /> Demo analysis</Link>
-          {savedRun?.metadata.mode === "live" && <Link href="/analyses/live"><History size={16} /> Resume analysis</Link>}
+          {items.map((item) => <NavigationLink key={item.group} item={item} activeGroup={activeGroup} showIcon />)}
         </nav>
         <details className="mobile-menu">
           <summary aria-label="Open navigation"><Menu size={20} /></summary>
           <nav aria-label="Mobile navigation">
-            <Link href="/">Home</Link>
-            <Link href="/assessments/new">New assessment</Link>
-            <Link href="/analyses/demo">Demo analysis</Link>
-            {savedRun?.metadata.mode === "live" && <Link href="/analyses/live">Resume analysis</Link>}
+            {items.map((item) => <NavigationLink key={item.group} item={item} activeGroup={activeGroup} />)}
           </nav>
         </details>
       </header>
@@ -32,4 +38,14 @@ export function AppShell({ children, active = "analysis" }: { children: ReactNod
       <footer className="app-footer"><Logo compact /><span>See how your class is thinking.</span><span>Teacher-reviewed reasoning intelligence</span></footer>
     </div>
   );
+}
+
+function NavigationLink({ item, activeGroup, showIcon = false }: {
+  item: (typeof navigationItems)[number];
+  activeGroup: NavigationGroup | null;
+  showIcon?: boolean;
+}) {
+  const isActive = item.group === activeGroup;
+  const Icon = item.icon;
+  return <Link href={item.href} className={isActive ? "active" : undefined} aria-current={isActive ? "page" : undefined}>{showIcon && <Icon size={16} />}{item.label}</Link>;
 }

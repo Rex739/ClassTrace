@@ -201,3 +201,22 @@ test("deleting a saved analysis requires explicit confirmation", async ({ page }
   await page.getByRole("alertdialog", { name: "Delete saved analysis" }).getByRole("button", { name: "Delete saved analysis" }).click();
   expect(await page.evaluate(() => localStorage.getItem("classtrace:v1:latest-analysis"))).toBeNull();
 });
+
+test("demo and live navigation states remain exclusive after direct navigation and refresh", async ({ page }) => {
+  const navs = ["Primary navigation", "Mobile navigation"];
+  await page.goto("/analyses/demo");
+  for (const navName of navs) {
+    const nav = page.getByRole("navigation", { name: navName, includeHidden: true });
+    await expect(nav.getByRole("link", { name: "Demo analysis", includeHidden: true })).toHaveAttribute("aria-current", "page");
+  }
+
+  await page.goto("/");
+  await page.evaluate((snapshot) => localStorage.setItem("classtrace:v1:latest-analysis", JSON.stringify(snapshot)), savedSnapshot());
+  await page.goto("/analyses/live/outcomes");
+  await page.reload();
+  for (const navName of navs) {
+    const nav = page.getByRole("navigation", { name: navName, includeHidden: true });
+    await expect(nav.getByRole("link", { name: "Resume analysis", includeHidden: true })).toHaveAttribute("aria-current", "page");
+    await expect(nav.getByRole("link", { name: "Demo analysis", includeHidden: true })).not.toHaveAttribute("aria-current", "page");
+  }
+});

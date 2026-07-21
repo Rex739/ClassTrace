@@ -47,7 +47,7 @@ h2 { font-size: clamp(1.55rem, 2.8vw, 2.25rem); line-height: 1.12; }
 .mobile-menu summary { list-style: none; cursor: pointer; padding: 8px; }
 .mobile-menu nav { position: absolute; right: 0; top: 42px; z-index: 30; min-width: 190px; display: grid; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 12px; padding: 8px; }
 .mobile-menu nav a { padding: 10px; border-radius: 7px; }
-.mobile-menu nav a:hover { background: var(--blue-soft); }
+.mobile-menu nav a:hover, .mobile-menu nav a.active { background: var(--blue-soft); color: var(--ink); }
 .app-footer { min-height: 96px; width: min(1280px, calc(100% - 40px)); margin: 40px auto 0; padding-block: 28px; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: .85rem; }
 .app-footer > :last-child { margin-left: auto; }
 
