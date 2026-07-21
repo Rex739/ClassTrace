@@ -10,9 +10,8 @@ import type { ValidatedImage } from "@/lib/ai/files";
 import { getResponseRefusal } from "@/lib/ai/response";
 import {
   buildAndValidateAnalysisInputManifest,
+  executeTwoBatchAnalysisWithTimeoutFallback,
   inspectSubmissionBatchResponse,
-  mergeSubmissionBatchResponses,
-  requestForResponseIds,
   runSubmissionAnalysisWithRecovery,
   type SubmissionBatchExecutor,
 } from "@/lib/ai/submission-batch";
@@ -20,12 +19,22 @@ import {
 export type AnalysisStage = "preparing" | "reading" | "reasoning" | "clustering" | "validating" | "review" | "complete";
 export type StageReporter = (stage: AnalysisStage, message: string) => void;
 
+export const PRIMARY_ANALYSIS_TIMEOUT_MS = 95_000;
+export const FALLBACK_ANALYSIS_TIMEOUT_MS = 30_000;
+export const MISSING_ID_REPAIR_TIMEOUT_MS = 10_000;
+export const CLUSTERING_TIMEOUT_MS = 35_000;
+export const WORST_CASE_ROUTE_BUDGET_MS =
+  PRIMARY_ANALYSIS_TIMEOUT_MS
+  + FALLBACK_ANALYSIS_TIMEOUT_MS
+  + MISSING_ID_REPAIR_TIMEOUT_MS
+  + CLUSTERING_TIMEOUT_MS;
+
 export async function analyseClassLive(request: AnalysisRequest, images: ValidatedImage[], report: StageReporter): Promise<AnalysisRun> {
   const openai = getOpenAIClient();
   report("reading", "Reading student work");
 
   report("reasoning", "Reconstructing observable reasoning");
-  const executeIndividualBatch: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt) => {
+  const executeIndividualBatch: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt, context) => {
     const individualPrompt = buildIndividualAnalysisPrompt({
       question: batchRequest.question,
       expectedReasoning: batchRequest.expectedReasoning,
@@ -63,7 +72,7 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
       max_output_tokens: 16_000,
       text: { format: zodTextFormat(schema, `classtrace_submission_analyses_${attempt}`) },
       store: false,
-    }).withResponse();
+    }, { timeout: context?.timeoutMs ?? PRIMARY_ANALYSIS_TIMEOUT_MS, maxRetries: 0 }).withResponse();
     const result = {
       status: individualResponse.status ?? "unknown",
       incompleteDetails: individualResponse.incomplete_details,
@@ -84,13 +93,47 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
     }
     return result;
   };
-  const executeWithBoundedBatching: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt) => {
-    if (attempt !== "primary" || responseIds.length <= 6) {
-      return executeIndividualBatch(batchRequest, responseIds, attempt);
+  const executeWithBoundedBatching: SubmissionBatchExecutor = async (batchRequest, responseIds, attempt, context) => {
+    if (attempt === "repair") {
+      return executeIndividualBatch(batchRequest, responseIds, attempt, {
+        batchId: "missing-id-repair",
+        timeoutMs: MISSING_ID_REPAIR_TIMEOUT_MS,
+      });
     }
-    const responseIdBatches = [responseIds.slice(0, 6), responseIds.slice(6)];
-    const results = await Promise.all(responseIdBatches.map((ids) => executeIndividualBatch(requestForResponseIds(batchRequest, ids), ids, attempt)));
-    return mergeSubmissionBatchResponses(results);
+    if (responseIds.length <= 6) {
+      return executeIndividualBatch(batchRequest, responseIds, attempt, context ?? {
+        batchId: "primary-1",
+        timeoutMs: PRIMARY_ANALYSIS_TIMEOUT_MS,
+      });
+    }
+    const { response, telemetry } = await executeTwoBatchAnalysisWithTimeoutFallback(
+      batchRequest,
+      responseIds,
+      executeIndividualBatch,
+      {
+        primaryTimeoutMs: PRIMARY_ANALYSIS_TIMEOUT_MS,
+        fallbackTimeoutMs: FALLBACK_ANALYSIS_TIMEOUT_MS,
+        onFallback: () => {
+          report("reasoning", "Completing a slower response group");
+          console.info("ClassTrace individual-analysis timeout fallback", { timeoutFallbackUsed: true });
+        },
+        observeBatch: (event) => console.info("ClassTrace individual-analysis batch", event),
+      },
+    );
+    console.info("ClassTrace individual-analysis batch summary", {
+      successfulBatchIds: [...telemetry.primary, ...telemetry.fallback]
+        .filter((event) => event.outcome === "completed")
+        .map((event) => event.batchId),
+      failedBatchIds: [...telemetry.primary, ...telemetry.fallback]
+        .filter((event) => event.outcome !== "completed")
+        .map((event) => event.batchId),
+      primaryDurationsMs: telemetry.primary.map((event) => event.durationMs),
+      timeoutFallbackUsed: telemetry.fallbackUsed,
+      fallbackDurationsMs: telemetry.fallback.map((event) => event.durationMs),
+      usage: [...telemetry.primary, ...telemetry.fallback].map((event) => ({ batchId: event.batchId, usage: event.usage })),
+      finalResponseMembershipCount: telemetry.finalResponseMembershipCount,
+    });
+    return response;
   };
   const { analyses: individualAnalyses } = await runSubmissionAnalysisWithRecovery(request, executeWithBoundedBatching);
 
@@ -105,7 +148,7 @@ export async function analyseClassLive(request: AnalysisRequest, images: Validat
     max_output_tokens: 16_000,
     text: { format: zodTextFormat(ClassAnalysisSchema, "classtrace_class_analysis") },
     store: false,
-  }).withResponse();
+  }, { timeout: CLUSTERING_TIMEOUT_MS, maxRetries: 0 }).withResponse();
   if (process.env.NODE_ENV !== "production") {
     console.info("ClassTrace cohort-clustering response", {
       stage: "cohort-clustering-request",

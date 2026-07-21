@@ -1,4 +1,4 @@
-import { ClassTraceError } from "@/lib/ai/errors";
+import { ClassTraceError, toClassTraceError } from "@/lib/ai/errors";
 import { normalizeSubmissionAnalyses } from "@/lib/ai/normalize";
 import { SubmissionAnalysesSchema, type AnalysisRequest, type SubmissionAnalysis } from "@/lib/ai/schemas";
 
@@ -52,7 +52,36 @@ export type SubmissionBatchExecutor = (
   request: AnalysisRequest,
   responseIds: string[],
   attempt: "primary" | "repair",
+  context?: SubmissionBatchExecutionContext,
 ) => Promise<SubmissionBatchResponse>;
+
+export interface SubmissionBatchExecutionContext {
+  batchId: string;
+  timeoutMs: number;
+}
+
+export interface SafeTimeoutBatchEvent {
+  batchId: string;
+  phase: "primary" | "fallback";
+  outcome: "completed" | "timeout" | "failed";
+  durationMs: number;
+  usage: SafeUsage | null;
+  responseCount: number;
+}
+
+export interface TimeoutFallbackTelemetry {
+  primary: SafeTimeoutBatchEvent[];
+  fallbackUsed: boolean;
+  fallback: SafeTimeoutBatchEvent[];
+  finalResponseMembershipCount: number;
+}
+
+export interface TimeoutFallbackOptions {
+  primaryTimeoutMs: number;
+  fallbackTimeoutMs: number;
+  onFallback?: () => void;
+  observeBatch?: (event: SafeTimeoutBatchEvent) => void;
+}
 
 export type SubmissionBatchStage = "individual-normalization" | "missing-id-repair";
 export type SubmissionBatchStageObserver = (event: {
@@ -104,6 +133,125 @@ export function mergeSubmissionBatchResponses(responses: SubmissionBatchResponse
     requestId: responses.map((response) => response.requestId).filter(Boolean).join(",") || null,
     sdkRetryUsed: responses.some((response) => response.sdkRetryUsed),
     applicationRepairUsed: responses.some((response) => response.applicationRepairUsed),
+  };
+}
+
+function isTimeout(error: unknown): boolean {
+  return toClassTraceError(error).code === "API_TIMEOUT";
+}
+
+function parsedResponseCount(response: SubmissionBatchResponse): number {
+  const parsed = SubmissionAnalysesSchema.safeParse(response.outputParsed);
+  return parsed.success ? parsed.data.analyses.length : 0;
+}
+
+/**
+ * Runs the two primary response groups while retaining a completed peer when
+ * exactly one group times out. The timeout fallback is deliberately not
+ * recursive: the failed group is split once and either completes or surfaces
+ * the existing recoverable error.
+ */
+export async function executeTwoBatchAnalysisWithTimeoutFallback(
+  request: AnalysisRequest,
+  responseIds: string[],
+  execute: SubmissionBatchExecutor,
+  options: TimeoutFallbackOptions,
+): Promise<{ response: SubmissionBatchResponse; telemetry: TimeoutFallbackTelemetry }> {
+  const primaryGroups = [responseIds.slice(0, 6), responseIds.slice(6)];
+  const primaryEvents: SafeTimeoutBatchEvent[] = [];
+  const fallbackEvents: SafeTimeoutBatchEvent[] = [];
+
+  const run = async (
+    ids: string[],
+    batchId: string,
+    phase: "primary" | "fallback",
+    timeoutMs: number,
+  ): Promise<SubmissionBatchResponse> => {
+    const startedAt = performance.now();
+    try {
+      const response = await execute(
+        requestForResponseIds(request, ids),
+        ids,
+        "primary",
+        { batchId, timeoutMs },
+      );
+      const event: SafeTimeoutBatchEvent = {
+        batchId,
+        phase,
+        outcome: "completed",
+        durationMs: Math.round(performance.now() - startedAt),
+        usage: response.usage,
+        responseCount: parsedResponseCount(response),
+      };
+      (phase === "primary" ? primaryEvents : fallbackEvents).push(event);
+      options.observeBatch?.(event);
+      return response;
+    } catch (error) {
+      const normalized = toClassTraceError(error);
+      const event: SafeTimeoutBatchEvent = {
+        batchId,
+        phase,
+        outcome: isTimeout(normalized) ? "timeout" : "failed",
+        durationMs: Math.round(performance.now() - startedAt),
+        usage: null,
+        responseCount: 0,
+      };
+      (phase === "primary" ? primaryEvents : fallbackEvents).push(event);
+      options.observeBatch?.(event);
+      throw normalized;
+    }
+  };
+
+  const primarySettled = await Promise.allSettled(primaryGroups.map((ids, index) =>
+    run(ids, `primary-${index + 1}`, "primary", options.primaryTimeoutMs),
+  ));
+  const primaryFailures = primarySettled
+    .map((result, index) => ({ result, index }))
+    .filter((item): item is { result: PromiseRejectedResult; index: number } => item.result.status === "rejected");
+
+  if (primaryFailures.length === 0) {
+    const response = mergeSubmissionBatchResponses(primarySettled.map((item) => (item as PromiseFulfilledResult<SubmissionBatchResponse>).value));
+    return {
+      response,
+      telemetry: {
+        primary: primaryEvents,
+        fallbackUsed: false,
+        fallback: [],
+        finalResponseMembershipCount: parsedResponseCount(response),
+      },
+    };
+  }
+
+  const timeoutFailures = primaryFailures.filter(({ result }) => isTimeout(result.reason));
+  if (primaryFailures.length !== 1 || timeoutFailures.length !== 1) {
+    throw toClassTraceError(primaryFailures[0]!.result.reason);
+  }
+
+  options.onFallback?.();
+  const failedIndex = timeoutFailures[0]!.index;
+  const failedIds = primaryGroups[failedIndex]!;
+  const splitPoint = Math.ceil(failedIds.length / 2);
+  const fallbackGroups = [failedIds.slice(0, splitPoint), failedIds.slice(splitPoint)];
+  const fallbackSettled = await Promise.allSettled(fallbackGroups.map((ids, index) =>
+    run(ids, `fallback-${failedIndex + 1}-${index + 1}`, "fallback", options.fallbackTimeoutMs),
+  ));
+  const fallbackFailure = fallbackSettled.find((item): item is PromiseRejectedResult => item.status === "rejected");
+  if (fallbackFailure) throw toClassTraceError(fallbackFailure.reason);
+
+  const successfulPrimary = primarySettled.find((item): item is PromiseFulfilledResult<SubmissionBatchResponse> => item.status === "fulfilled");
+  if (!successfulPrimary) throw toClassTraceError(timeoutFailures[0]!.result.reason);
+  const response = mergeSubmissionBatchResponses([
+    successfulPrimary.value,
+    ...fallbackSettled.map((item) => (item as PromiseFulfilledResult<SubmissionBatchResponse>).value),
+  ]);
+  return {
+    response,
+    telemetry: {
+      primary: primaryEvents,
+      fallbackUsed: true,
+      fallback: fallbackEvents,
+      finalResponseMembershipCount: parsedResponseCount(response),
+    },
   };
 }
 

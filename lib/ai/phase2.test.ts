@@ -12,7 +12,7 @@ import { applyTeacherEdits, buildEvidenceExport, emptyTeacherEdits } from "@/lib
 import { createPreparedAnalysisRun } from "@/lib/ai/prepared";
 import { getRunLabel } from "@/lib/run-provenance";
 import { getResponseRefusal } from "@/lib/ai/response";
-import { buildAndValidateAnalysisInputManifest, mergeSubmissionBatchResponses, requestForResponseIds, runSubmissionAnalysisWithRecovery, type SubmissionBatchResponse } from "@/lib/ai/submission-batch";
+import { buildAndValidateAnalysisInputManifest, executeTwoBatchAnalysisWithTimeoutFallback, mergeSubmissionBatchResponses, requestForResponseIds, runSubmissionAnalysisWithRecovery, type SubmissionBatchExecutionContext, type SubmissionBatchResponse } from "@/lib/ai/submission-batch";
 
 const request = AnalysisRequestSchema.parse({
   mode: "live",
@@ -42,6 +42,41 @@ function analysis(responseId: string, confidence = .9, inputStatus: SubmissionAn
     confidence,
     requiresTeacherReview: false,
     reviewReason: null,
+  };
+}
+
+const twelveResponseRequest = AnalysisRequestSchema.parse({
+  ...request,
+  typedResponses: Array.from({ length: 12 }, (_, index) => ({
+    responseId: `response-${String(index + 1).padStart(2, "0")}`,
+    studentAlias: `Learner ${String(index + 1).padStart(2, "0")}`,
+    responseText: `Synthetic reasoning response ${index + 1}.`,
+  })),
+});
+
+function twelveResponseAnalysis(responseId: string): SubmissionAnalysis {
+  const submission = twelveResponseRequest.typedResponses.find((item) => item.responseId === responseId)!;
+  return {
+    ...analysis("r1"),
+    responseId,
+    studentAlias: submission.studentAlias,
+    extractedResponse: submission.responseText,
+    reasoningSteps: [{ order: 1, description: "Uses observable reasoning", evidenceExcerpt: submission.responseText }],
+    evidence: [{ exactExcerpt: submission.responseText, interpretation: "Observable response evidence" }],
+  };
+}
+
+function completedBatch(ids: string[], analyses = ids.map(twelveResponseAnalysis)): SubmissionBatchResponse {
+  return {
+    status: "completed",
+    incompleteDetails: null,
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+    outputParsed: { analyses },
+    refusal: null,
+    latencyMs: 5,
+    requestId: `req_${ids.join("_")}`,
+    sdkRetryUsed: false,
+    applicationRepairUsed: false,
   };
 }
 
@@ -161,6 +196,91 @@ describe("Phase 2 schemas and normalization", () => {
     const subset = requestForResponseIds(request, ["r2"]);
     expect(subset.typedResponses.map((item) => item.responseId)).toEqual(["r2"]);
     expect(subset.imageResponses).toEqual([]);
+  });
+
+  it("retains the successful primary batch and splits only the timed-out batch once", async () => {
+    const calls: Array<{ ids: string[]; context?: SubmissionBatchExecutionContext }> = [];
+    const execute = async (
+      _batchRequest: typeof twelveResponseRequest,
+      ids: string[],
+      _attempt: "primary" | "repair",
+      context?: SubmissionBatchExecutionContext,
+    ): Promise<SubmissionBatchResponse> => {
+      calls.push({ ids, context });
+      if (context?.batchId === "primary-2") {
+        throw new ClassTraceError("API_TIMEOUT", "The live analysis took too long. Please retry.", true, 504);
+      }
+      return completedBatch(ids);
+    };
+    const responseIds = twelveResponseRequest.typedResponses.map((item) => item.responseId);
+    const result = await executeTwoBatchAnalysisWithTimeoutFallback(twelveResponseRequest, responseIds, execute, {
+      primaryTimeoutMs: 90_000,
+      fallbackTimeoutMs: 30_000,
+    });
+    const normalized = normalizeSubmissionAnalyses(result.response.outputParsed, twelveResponseRequest);
+
+    expect(normalized.map((item) => item.responseId)).toEqual(responseIds);
+    expect(new Set(normalized.map((item) => item.responseId)).size).toBe(12);
+    expect(calls.map((call) => call.ids)).toEqual([
+      responseIds.slice(0, 6),
+      responseIds.slice(6),
+      responseIds.slice(6, 9),
+      responseIds.slice(9),
+    ]);
+    expect(calls.filter((call) => call.ids.includes("response-01"))).toHaveLength(1);
+    expect(result.telemetry).toMatchObject({ fallbackUsed: true, finalResponseMembershipCount: 12 });
+    expect(result.telemetry.fallback).toHaveLength(2);
+  });
+
+  it("rejects duplicate and missing IDs after timeout-fallback merging", async () => {
+    const responseIds = twelveResponseRequest.typedResponses.map((item) => item.responseId);
+    const runWithReplacement = async (replacement: (ids: string[], context?: SubmissionBatchExecutionContext) => SubmissionAnalysis[]) => {
+      const execute = async (
+        _batchRequest: typeof twelveResponseRequest,
+        ids: string[],
+        _attempt: "primary" | "repair",
+        context?: SubmissionBatchExecutionContext,
+      ): Promise<SubmissionBatchResponse> => {
+        if (context?.batchId === "primary-2") throw new ClassTraceError("API_TIMEOUT", "Timed out", true, 504);
+        return completedBatch(ids, replacement(ids, context));
+      };
+      return executeTwoBatchAnalysisWithTimeoutFallback(twelveResponseRequest, responseIds, execute, {
+        primaryTimeoutMs: 90_000,
+        fallbackTimeoutMs: 30_000,
+      });
+    };
+
+    const duplicate = await runWithReplacement((ids, context) => context?.batchId === "fallback-2-2"
+      ? ids.map((id, index) => twelveResponseAnalysis(index === 0 ? "response-07" : id))
+      : ids.map(twelveResponseAnalysis));
+    expect(() => normalizeSubmissionAnalyses(duplicate.response.outputParsed, twelveResponseRequest)).toThrow(/more than once/);
+
+    const missing = await runWithReplacement((ids, context) => context?.batchId === "fallback-2-2"
+      ? ids.slice(1).map(twelveResponseAnalysis)
+      : ids.map(twelveResponseAnalysis));
+    expect(() => normalizeSubmissionAnalyses(missing.response.outputParsed, twelveResponseRequest)).toThrow(/omitted 1 response/);
+  });
+
+  it("uses no deterministic substitute and returns API_TIMEOUT when the one fallback fails", async () => {
+    const calls: string[] = [];
+    const responseIds = twelveResponseRequest.typedResponses.map((item) => item.responseId);
+    const execute = async (
+      _batchRequest: typeof twelveResponseRequest,
+      ids: string[],
+      _attempt: "primary" | "repair",
+      context?: SubmissionBatchExecutionContext,
+    ): Promise<SubmissionBatchResponse> => {
+      calls.push(context?.batchId ?? "unknown");
+      if (context?.batchId === "primary-1") return completedBatch(ids);
+      throw new ClassTraceError("API_TIMEOUT", "The live analysis took too long. Please retry.", true, 504);
+    };
+
+    await expect(executeTwoBatchAnalysisWithTimeoutFallback(twelveResponseRequest, responseIds, execute, {
+      primaryTimeoutMs: 90_000,
+      fallbackTimeoutMs: 30_000,
+    })).rejects.toMatchObject({ code: "API_TIMEOUT", message: "The live analysis took too long. Please retry." });
+    expect(calls).toEqual(["primary-1", "primary-2", "fallback-2-1", "fallback-2-2"]);
+    expect(calls.filter((batchId) => batchId.startsWith("fallback"))).toHaveLength(2);
   });
 
   it("throws a specific error for incomplete API responses without attempting repair", async () => {
