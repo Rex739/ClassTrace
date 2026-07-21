@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { TransferDifficultyDetail } from "@/components/transfer-difficulty-detail";
+import { transferComparisonDisplay } from "@/lib/outcome-display";
+
+describe("transfer outcome before-and-after wording", () => {
+  it.each([
+    ["resolved", { count: 0, label: "misconceptions remaining", bar: "0%" }],
+    ["partially_resolved", { count: 1, label: "partially resolved", bar: "100%" }],
+    ["unresolved", { count: 1, label: "still unresolved", bar: "100%" }],
+    ["uncertain", { count: 1, label: "requires further evidence", bar: "100%" }],
+  ] as const)("uses accurate comparison wording for %s", (status, expected) => {
+    expect(transferComparisonDisplay(status)).toEqual(expected);
+  });
+});
 
 describe("transfer outcome difficulty wording", () => {
   it("labels resolved follow-on content as an optional extension", () => {

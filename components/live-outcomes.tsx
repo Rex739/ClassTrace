@@ -9,6 +9,7 @@ import { ProductBoundaryNote } from "@/components/product-boundary-note";
 import { ProvenanceCard } from "@/components/provenance-card";
 import { TransferDifficultyDetail } from "@/components/transfer-difficulty-detail";
 import { useAnalysisRun, useIntervention, useTransferEvaluation } from "@/lib/use-client-store";
+import { transferComparisonDisplay } from "@/lib/outcome-display";
 
 export function LiveOutcomes() {
   const run = useAnalysisRun();
@@ -28,6 +29,7 @@ export function LiveOutcomes() {
   }
 
   const tone = evaluation?.status === "resolved" ? "green" : evaluation?.status === "unresolved" ? "red" : "amber";
+  const comparison = evaluation ? transferComparisonDisplay(evaluation.status) : null;
 
   return (
     <AppShell active="analysis">
@@ -48,7 +50,7 @@ export function LiveOutcomes() {
               <div className="comparison-label"><span className="eyebrow"><TrendingDown size={15} /> Before and after</span><h2>Evidence for one completed transfer check</h2></div>
               <div className="comparison-side"><span>Before intervention</span><strong>1</strong><div className="bar before" style={{ "--bar": "100%" } as React.CSSProperties} /><small>targeted possible misconception</small></div>
               <div className="comparison-arrow">→</div>
-              <div className="comparison-side"><span>After transfer check</span><strong>{evaluation.status === "resolved" ? 0 : 1}</strong><div className="bar after" style={{ "--bar": evaluation.status === "resolved" ? "0%" : "100%" } as React.CSSProperties} /><small>{evaluation.status.replace("_", " ")}</small></div>
+              <div className="comparison-side"><span>After transfer check</span><strong>{comparison!.count}</strong><div className="bar after" style={{ "--bar": comparison!.bar } as React.CSSProperties} /><small>{comparison!.label}</small></div>
             </section>
             <section className="outcome-status-grid">
               <article className={evaluation.status === "resolved" ? "status-resolved" : "status-uncertain"}>
