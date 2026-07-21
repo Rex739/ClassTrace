@@ -5,6 +5,7 @@ import { ClassTraceError } from "@/lib/ai/errors";
 import { getOpenAIClient, CLASSTRACE_MODEL } from "@/lib/ai/openai";
 import { buildTransferPrompt } from "@/lib/ai/prompts";
 import { TransferEvaluationSchema, type TransferEvaluation, type TransferRequestSchema } from "@/lib/ai/schemas";
+import { normalizeTransferEvaluation } from "@/lib/ai/normalize";
 import type { z } from "zod";
 import { getResponseRefusal } from "@/lib/ai/response";
 
@@ -22,7 +23,7 @@ export async function evaluateTransfer(input: TransferRequest): Promise<Transfer
   });
   if (getResponseRefusal(response)) throw new ClassTraceError("MODEL_REFUSAL", "GPT-5.6 declined to evaluate this transfer response. Ask the teacher to review it directly.", false, 422);
   if (!response.output_parsed) throw new ClassTraceError("MALFORMED_OUTPUT", "GPT-5.6 did not return a valid transfer evaluation.", true, 502);
-  const parsed = TransferEvaluationSchema.parse(response.output_parsed);
+  const parsed = normalizeTransferEvaluation(TransferEvaluationSchema.parse(response.output_parsed));
   const evidenceIsVerbatim = !parsed.evidenceExcerpt || `${input.learnerAnswer}\n${input.learnerExplanation}`.includes(parsed.evidenceExcerpt);
   return TransferEvaluationSchema.parse({
     ...parsed,

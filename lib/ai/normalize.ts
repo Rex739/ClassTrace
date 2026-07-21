@@ -2,10 +2,39 @@ import { ClassTraceError } from "@/lib/ai/errors";
 import {
   ClassAnalysisSchema,
   SubmissionAnalysesSchema,
+  TransferEvaluationSchema,
   type AnalysisRequest,
   type ClassAnalysis,
   type SubmissionAnalysis,
+  type TransferEvaluation,
 } from "@/lib/ai/schemas";
+
+const OPTIONAL_TEXT_PLACEHOLDERS = new Set([
+  "none",
+  "n a",
+  "na",
+  "not applicable",
+  "not available",
+  "no remaining difficulty",
+  "no difficulty",
+  "nothing",
+]);
+
+export function normalizeOptionalModelText(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (!trimmed || !/[\p{L}\p{N}]/u.test(trimmed)) return null;
+  const comparable = trimmed.toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return OPTIONAL_TEXT_PLACEHOLDERS.has(comparable) ? null : trimmed;
+}
+
+export function normalizeTransferEvaluation(evaluation: TransferEvaluation): TransferEvaluation {
+  return TransferEvaluationSchema.parse({
+    ...evaluation,
+    remainingDifficulty: normalizeOptionalModelText(evaluation.remainingDifficulty),
+    evidenceExcerpt: normalizeOptionalModelText(evaluation.evidenceExcerpt),
+  });
+}
 
 function sourceTextFor(responseId: string, request: AnalysisRequest, analysis: SubmissionAnalysis): string {
   return request.typedResponses.find((item) => item.responseId === responseId)?.responseText ?? analysis.extractedResponse;
@@ -31,9 +60,14 @@ export function normalizeSubmissionAnalyses(raw: unknown, request: AnalysisReque
     }
     return {
       ...analysis,
+      finalAnswer: normalizeOptionalModelText(analysis.finalAnswer),
+      reasoningSteps: analysis.reasoningSteps.map((step) => ({
+        ...step,
+        evidenceExcerpt: normalizeOptionalModelText(step.evidenceExcerpt),
+      })),
       studentAlias: alias,
       requiresTeacherReview,
-      reviewReason: requiresTeacherReview ? (analysis.reviewReason ?? "Teacher review is required because evidence is incomplete or confidence is below 0.70.") : null,
+      reviewReason: requiresTeacherReview ? (normalizeOptionalModelText(analysis.reviewReason) ?? "Teacher review is required because evidence is incomplete or confidence is below 0.70.") : null,
     };
   });
 

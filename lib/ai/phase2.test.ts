@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InterventionRenderer } from "@/components/live-intervention-studio";
 import { AnalysisRequestSchema, buildSubmissionAnalysisBatchSchema, ClassAnalysisSchema, InterventionConfigSchema, SubmissionAnalysesSchema, TransferEvaluationSchema, type SubmissionAnalysis } from "@/lib/ai/schemas";
-import { normalizeClassAnalysis, normalizeSubmissionAnalyses, membershipProblems } from "@/lib/ai/normalize";
+import { normalizeClassAnalysis, normalizeOptionalModelText, normalizeSubmissionAnalyses, normalizeTransferEvaluation, membershipProblems } from "@/lib/ai/normalize";
 import { buildIndividualAnalysisPrompt, buildTransferPrompt, containsExecutableInterventionContent, promptBoundaries } from "@/lib/ai/prompts";
 import { validateImageFile } from "@/lib/ai/files";
 import { ClassTraceError, safeErrorPayload, toClassTraceError } from "@/lib/ai/errors";
@@ -69,6 +69,32 @@ describe("Phase 2 schemas and normalization", () => {
   it("requires teacher review below 0.70 and for insufficient evidence", () => {
     const normalized = normalizeSubmissionAnalyses({ analyses: [analysis("r1", .69), analysis("r2", .9, "insufficient_evidence")] }, request);
     expect(normalized.every((item) => item.requiresTeacherReview)).toBe(true);
+  });
+
+  it.each([
+    [")", null],
+    ["-", null],
+    ["   \n\t  ", null],
+    ["None", null],
+    ["N/A", null],
+    ["The learner still applies the scale factor to only one radius term.", "The learner still applies the scale factor to only one radius term."],
+  ])("normalizes optional model text %j conservatively", (value, expected) => {
+    expect(normalizeOptionalModelText(value)).toBe(expected);
+  });
+
+  it("preserves a valid remaining difficulty for a partially resolved transfer", () => {
+    const remainingDifficulty = "The learner squares the scale factor correctly but does not yet explain why both radius factors change.";
+    const normalized = normalizeTransferEvaluation(TransferEvaluationSchema.parse({
+      status: "partially_resolved",
+      demonstratedConcepts: ["The area scale factor is nine."],
+      remainingDifficulty,
+      evidenceExcerpt: "The area is nine times larger.",
+      feedbackForStudent: "Your scale factor is correct; now connect it to both radius factors.",
+      recommendationForTeacher: "Ask the learner to expand r² as r × r.",
+      confidence: .88,
+      requiresTeacherReview: false,
+    }));
+    expect(normalized).toMatchObject({ status: "partially_resolved", remainingDifficulty });
   });
 
   it("rejects invented evidence excerpts", () => {
