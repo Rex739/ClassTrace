@@ -67,6 +67,16 @@ test("circle explorer responds to radius input", async ({ page }) => {
   await expect(page.getByText("4.00×")).toBeVisible();
 });
 
+test("learner activity logos link back to the home page", async ({ page }) => {
+  for (const route of ["/learn/demo", "/learn/live"]) {
+    await page.goto(route);
+    const logo = page.getByRole("link", { name: "ClassTrace home" });
+    await expect(logo).toHaveAttribute("href", "/");
+    await logo.click();
+    await expect(page).toHaveURL(/\/$/);
+  }
+});
+
 test("assessment setup distinguishes live and prepared modes", async ({ page }) => {
   await page.goto("/assessments/new");
   await expect(page.getByRole("button", { name: "Analyse with GPT-5.6" })).toBeVisible();

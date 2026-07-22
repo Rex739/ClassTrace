@@ -4,7 +4,7 @@
 
 ClassTrace analyses student work, identifies evidence-grounded reasoning patterns, helps teachers approve targeted interventions, and verifies whether understanding transfers to a new problem.
 
-[Live application](https://class-trace-one.vercel.app) · [GitHub repository](https://github.com/Rex739/ClassTrace) · **Demo video:** [ADD PUBLIC YOUTUBE URL] · **OpenAI Build Week / Devpost:** [ADD SUBMISSION URL]
+[Live application](https://class-trace-one.vercel.app) · [GitHub repository](https://github.com/Rex739/ClassTrace) · **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=CEkv1T_o9-A) · **OpenAI Build Week / Devpost:** [ADD SUBMISSION URL]
 
 ## The problem
 
@@ -50,7 +50,7 @@ Assessment setup
 ## Demo
 
 - **Live app:** [https://class-trace-one.vercel.app](https://class-trace-one.vercel.app)
-- **Demo video:** [ADD PUBLIC YOUTUBE URL]
+- **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=CEkv1T_o9-A)
 
 Reviewers can open the prepared demonstration instantly without an OpenAI call. Live mode uses **Analyse with GPT-5.6** to perform a real structured analysis and may take approximately one to two minutes.
 

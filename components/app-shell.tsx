@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, FilePlus2, History, Home, Menu, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { Logo } from "@/components/logo";
+import { Logo, LogoHomeLink } from "@/components/logo";
 import { useAnalysisRun } from "@/lib/use-client-store";
 import { navigationGroupForPath, type NavigationGroup } from "@/lib/navigation";
 
@@ -23,7 +23,7 @@ export function AppShell({ children }: { children: ReactNode; active?: "home" | 
   return (
     <div className="app-frame">
       <header className="app-header">
-        <Link href="/" aria-label="ClassTrace home"><Logo /></Link>
+        <LogoHomeLink />
         <nav aria-label="Primary navigation" className="desktop-nav">
           {items.map((item) => <NavigationLink key={item.group} item={item} activeGroup={activeGroup} showIcon />)}
         </nav>

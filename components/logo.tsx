@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ScanSearch } from "lucide-react";
 
 export function Logo({ compact = false }: { compact?: boolean }) {
@@ -7,4 +8,8 @@ export function Logo({ compact = false }: { compact?: boolean }) {
       {!compact && <span>ClassTrace</span>}
     </span>
   );
+}
+
+export function LogoHomeLink({ compact = false }: { compact?: boolean }) {
+  return <Link href="/" aria-label="ClassTrace home"><Logo compact={compact} /></Link>;
 }
