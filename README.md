@@ -4,7 +4,7 @@
 
 ClassTrace analyses student work, identifies evidence-grounded reasoning patterns, helps teachers approve targeted interventions, and verifies whether understanding transfers to a new problem.
 
-[Live application](https://class-trace-one.vercel.app) · [GitHub repository](https://github.com/Rex739/ClassTrace) · **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=CEkv1T_o9-A) · **OpenAI Build Week / Devpost:** [ADD SUBMISSION URL]
+[Live application](https://class-trace-one.vercel.app) · [GitHub repository](https://github.com/Rex739/ClassTrace) · **Demo video:** [Watch on YouTube](https://www.youtube.com/watch?v=CEkv1T_o9-A) · **OpenAI Build Week / Devpost:** [View submission](https://devpost.com/software/classtrace)
 
 ## The problem
 
@@ -266,4 +266,4 @@ The analysis routes use bounded request timeouts and a single application-level 
 
 ## License
 
-No license file is currently included. Usage and redistribution terms have not yet been specified.
+ClassTrace is available under the [MIT License](LICENSE).
